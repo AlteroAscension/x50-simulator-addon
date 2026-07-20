@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07111e">
+  <title>X50 Navigation Lab</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="map" aria-label="Карта симулятора"></main>
+  <div class="map-vignette"></div>
+
+  <header class="topbar glass">
+    <div class="brand">
+      <div class="brand-mark">X50</div>
+      <div><strong>Navigation Lab</strong><span>асинхронный стенд AVD</span></div>
+    </div>
+    <div class="top-status">
+      <span class="chip" id="gatewayChip"><i></i><span>Gateway</span></span>
+      <span class="chip" id="routeChip"><i></i><span>Маршрут —</span></span>
+      <div class="layer-switch" id="routeLayers" title="Слои захваченного маршрута">
+        <button data-layer="points">Точки</button>
+        <button data-layer="line">Линия</button>
+        <button data-layer="both" class="active">Всё</button>
+      </div>
+      <button class="icon-button stale-toggle" id="stalePointsToggle" title="Показать устаревшие или не относящиеся к маршруту history-точки" aria-label="Показать устаревшие точки" disabled>◷</button>
+      <button class="icon-button" id="fitRoute" title="Показать маршрут">⌖</button>
+      <button class="icon-button" id="fullscreenToggle" title="Полноэкранный режим" aria-label="Полноэкранный режим">⛶</button>
+      <button class="icon-button" id="settingsToggle" title="Настройки">⚙</button>
+    </div>
+  </header>
+
+  <section class="left-stack">
+    <article class="control-card glass">
+      <div class="card-heading">
+        <div><span class="eyebrow">Модель движения</span><h1>Скорость</h1></div>
+        <span class="run-state" id="runState">Остановлен</span>
+      </div>
+
+      <div class="speed-display">
+        <span id="speedValue">0</span><small>км/ч</small>
+        <div class="speed-secondary">GPS <b id="gpsSpeedValue">0</b> · CAN <b id="vehicleSpeedValue">0</b></div>
+      </div>
+      <input class="speed-range" id="speed" type="range" min="0" max="200" step="1" value="0">
+      <div class="range-scale"><span>0</span><span>50</span><span>100</span><span>150</span><span>200</span></div>
+
+      <div class="primary-actions">
+        <button class="primary" id="runButton"><span>▶</span> Запустить</button>
+        <button class="danger" id="stopButton"><span>■</span> Стоп</button>
+      </div>
+    </article>
+
+    <article class="mode-card glass">
+      <div class="card-heading compact"><div><span class="eyebrow">Источник позиции</span><h2>GPS-сценарий</h2></div></div>
+      <div class="segmented" id="gpsMode">
+        <button data-mode="fixed" class="active"><span>◎</span><b>Точка</b><small>Статичный GPS</small></button>
+        <button data-mode="route"><span>➜</span><b>FakeGPS</b><small>Движение по маршруту</small></button>
+      </div>
+      <div class="point-legend">
+        <span><i class="exact-dot"></i>MapKit <b id="exactCount">0</b></span>
+        <span><i class="guidance-dot"></i>Guidance <b id="guidanceCount">0</b></span>
+        <span><i class="history-dot"></i>History <b id="historyCount">0</b></span>
+        <span class="stale-legend"><i class="stale-dot"></i>Старые <b id="staleHistoryCount">0</b></span>
+      </div>
+      <div class="point-refresh-actions">
+        <button class="source-refresh exact-refresh" id="reloadExact" title="Получить точную геометрию активного DrivingRoute из MapKit">↻ MapKit exact</button>
+        <button class="source-refresh" id="reloadGuidance" title="Заново прочитать актуальные guidance-точки из Навигатора">↻ Guidance</button>
+        <button class="source-refresh" id="reloadHistory" title="Заново прочитать актуальные history-точки из Навигатора">↻ History</button>
+      </div>
+      <div class="coordinate-row">
+        <div><span>Выбранная точка</span><strong id="selectedCoordinate">Нажмите на карту</strong></div>
+        <button class="small-button" id="sendNow">Отправить</button>
+      </div>
+      <label class="switch-row">
+        <span><b>Fake Navigator Gateway</b><small>Проверка штатной подмены ГУ</small></span>
+        <input type="checkbox" id="gatewayFake"><i></i>
+      </label>
+    </article>
+  </section>
+
+  <aside class="settings-panel glass" id="settingsPanel">
+    <div class="card-heading compact">
+      <div><span class="eyebrow">Калибровка</span><h2>Погрешности автомобиля</h2></div>
+      <button class="icon-button close-settings" id="settingsClose">×</button>
+    </div>
+    <p class="hint">Истинная скорость задаётся ползунком. Коэффициенты независимо меняют GPS, CAN и прирост одометра.</p>
+
+    <div class="field-grid">
+      <label><span>GPS / движение</span><div><input id="gpsScale" type="number" min="50" max="150" step="0.1" value="100"><em>%</em></div><small>скорость координаты</small></label>
+      <label><span>CAN / автомобиль</span><div><input id="vehicleScale" type="number" min="50" max="150" step="0.1" value="102.5"><em>%</em></div><small>скорость от машины</small></label>
+      <label><span>Одометр</span><div><input id="odoScale" type="number" min="50" max="150" step="0.1" value="102.5"><em>%</em></div><small>опережение дистанции</small></label>
+      <label><span>Частота GPS</span><div><input id="gpsHz" type="number" min="1" max="10" step="1" value="5"><em>Гц</em></div><small>не менее Carlinkit</small></label>
+    </div>
+
+    <label class="wide-field"><span>Одометр, км</span><input id="odometer" type="number" min="0" step="0.001" value="0"></label>
+    <label class="wide-field"><span>Тестовый токен</span><input id="token" type="password" autocomplete="off" value="x50test"></label>
+
+    <div class="route-control">
+      <div><span>Прогресс маршрута</span><strong id="routeProgressText">0 / 0 км</strong></div>
+      <input id="routeProgress" type="range" min="0" max="1" step="1" value="0">
+      <button class="secondary full" id="reloadRoute">Перечитать маршрут из Навигатора</button>
+    </div>
+  </aside>
+
+  <section class="telemetry glass">
+    <div class="metric"><span>Передача GPS</span><strong><b id="effectiveHz">0.0</b> Гц</strong><small id="latency">— мс</small></div>
+    <div class="metric"><span>Скорость по точкам</span><strong><b id="measuredSpeed">0.0</b> км/ч</strong><small id="speedError">Δ 0.0</small></div>
+    <div class="metric"><span>Одометр</span><strong><b id="odoValue">0.000</b> км</strong><small id="odoBias">×1.025</small></div>
+    <div class="metric route-metric"><span>Маршрут</span><strong id="routeSummary">Ожидание захвата</strong><small id="fakeMode">Fake: выкл.</small></div>
+    <div class="metric"><span>Пакеты</span><strong><b id="sentCount">0</b> успешно</strong><small><b id="failedCount">0</b> ошибок</small></div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js?v=20260719-exact-mapkit-route2"></script>
+</body>
+</html>

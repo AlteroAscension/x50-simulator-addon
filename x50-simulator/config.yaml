@@ -1,0 +1,31 @@
+name: "X50 Navigation Simulator"
+slug: "x50_simulator"
+version: "1.0.0"
+description: "Асинхронный симулятор движения и подмены GPS координат для Belgee X50 / Geely Coolray"
+url: "https://github.com/AlteroAscension/x50-simulator-addon"
+arch:
+  - amd64
+  - aarch64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8090
+panel_icon: "mdi:car-sports"
+panel_title: "X50 Simulator"
+homeassistant_api: true
+host_network: true
+options:
+  adb_enabled: true
+  adb_host: "192.168.66.124"
+  adb_port: 5555
+  gateway_url: "http://192.168.66.124:8080"
+  gateway_token: "x50test"
+schema:
+  adb_enabled: bool
+  adb_host: str
+  adb_port: int
+  gateway_url: str
+  gateway_token: str
