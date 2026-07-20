@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -e
 
 CONFIG_PATH="/data/options.json"
 
@@ -21,7 +20,7 @@ echo "[X50 Add-on] Starting X50 Navigation Simulator..."
 
 if [ "$ADB_ENABLED" = "true" ] && [ -n "$ADB_HOST" ]; then
     echo "[X50 Add-on] Connecting ADB to ${ADB_HOST}:${ADB_PORT}..."
-    adb connect "${ADB_HOST}:${ADB_PORT}" || echo "[X50 Add-on] ADB connect attempt finished"
+    adb connect "${ADB_HOST}:${ADB_PORT}" || true
 fi
 
 export X50_GATEWAY_URL="$GATEWAY_URL"

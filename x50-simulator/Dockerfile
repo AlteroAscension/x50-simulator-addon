@@ -1,17 +1,21 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
 FROM ${BUILD_FROM}
 
+# Install Python 3, ADB (android-tools), dos2unix, bash, and utilities
 RUN apk add --no-cache \
     python3 \
     android-tools \
     bash \
     jq \
-    curl
+    curl \
+    dos2unix
 
 WORKDIR /app
 
 COPY app /app
 
-RUN chmod +x /app/run.sh
+# Ensure LF line endings and executable permissions
+RUN dos2unix /app/run.sh /app/server.py /app/index.html /app/app.js /app/styles.css && \
+    chmod +x /app/run.sh
 
 CMD [ "/app/run.sh" ]
