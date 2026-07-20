@@ -1,5 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
-FROM ${BUILD_FROM}
+FROM alpine:3.19
 
 # Install Python 3, ADB (android-tools), dos2unix, bash, and utilities
 RUN apk add --no-cache \
@@ -18,4 +17,4 @@ COPY app /app
 RUN dos2unix /app/run.sh /app/server.py /app/index.html /app/app.js /app/styles.css && \
     chmod +x /app/run.sh
 
-CMD [ "/app/run.sh" ]
+ENTRYPOINT [ "/app/run.sh" ]
