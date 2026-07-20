@@ -25,7 +25,7 @@
 @media(max-height:780px){
   .topbar{top:10px;height:56px}.brand-mark{width:36px;height:36px}.left-stack{top:76px;bottom:96px;gap:8px}.control-card,.mode-card{padding:12px}.speed-display{padding:5px 0 3px}.speed-display>span{font-size:46px}.primary-actions{margin-top:8px}.segmented{margin-top:8px}.segmented button{padding:7px}.coordinate-row{margin-top:8px;padding-top:8px}.switch-row{margin-top:8px}.telemetry{bottom:10px;height:76px}.settings-panel{top:76px;bottom:96px}
 }
-@media(max-width:850px){.left-stack{bottom:88px}.settings-panel{bottom:88px}.layer-switch button{font-size:0;width:25px;padding:0}.layer-switch button:after{font-size:11px}.layer-switch button[data-layer="points"]:after{content:'•'}.layer-switch button[data-layer="line"]:after{content:'╱'}.layer-switch button[data-layer="both"]:after{content:'•╱'}}
+@media(max-width:850px){.left-stack{bottom:88px}.settings-panel{bottom:88px}}
 @media(max-width:650px){
   .topbar{left:8px;right:8px;top:8px;height:48px;padding:4px 8px;border-radius:14px}
   .brand-mark{width:32px;height:32px;font-size:11px;border-radius:9px}
@@ -34,7 +34,11 @@
   .chip{height:30px;padding:0 7px;font-size:10px;border-radius:9px}
   .icon-button{width:30px;height:30px;font-size:14px;border-radius:9px}
   .layer-switch{height:30px;padding:2px}
-  .layer-switch button{height:26px;padding:0 5px;font-size:9px}
+  .layer-switch button{width:26px;height:26px;padding:0;font-size:12px}
+  .layer-switch button span{display:none!important}
+  .layer-switch button[data-layer="points"]:before{content:'•';font-size:16px}
+  .layer-switch button[data-layer="line"]:before{content:'╱';font-size:13px}
+  .layer-switch button[data-layer="both"]:before{content:'❖';font-size:12px}
   .stale-toggle{display:none}
   .telemetry{display:none!important}
   
@@ -49,11 +53,20 @@
   
   .left-stack{
     position:fixed;left:8px;right:8px;bottom:8px;top:auto;width:auto;
-    max-height:85vh;z-index:550;display:flex;flex-direction:column;gap:6px;
+    max-height:85vh;z-index:550;display:flex;flex-direction:column;gap:4px;
     transition:transform .24s ease
   }
   
   .left-stack:not(.expanded) .mode-card{display:none!important}
+  .left-stack.expanded .mode-card{
+    display:block!important;
+    order:-1;
+    margin-bottom:4px;
+    max-height:58vh;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    background:var(--glass-strong)!important
+  }
   
   /* Compact Speed Dock on Mobile */
   .control-card{padding:10px 12px!important;border-radius:16px!important}

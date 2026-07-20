@@ -22,9 +22,9 @@
       <span class="chip" id="gatewayChip" style="cursor:pointer;" title="Нажмите для смены адреса X50 Gateway"><i></i><span>Gateway</span></span>
       <span class="chip" id="routeChip"><i></i><span>Маршрут —</span></span>
       <div class="layer-switch" id="routeLayers" title="Слои захваченного маршрута">
-        <button data-layer="points">Точки</button>
-        <button data-layer="line">Линия</button>
-        <button data-layer="both" class="active">Всё</button>
+        <button data-layer="points"><span>Точки</span></button>
+        <button data-layer="line"><span>Линия</span></button>
+        <button data-layer="both" class="active"><span>Всё</span></button>
       </div>
       <button class="icon-button stale-toggle" id="stalePointsToggle" title="Показать устаревшие или не относящиеся к маршруту history-точки" aria-label="Показать устаревшие точки" disabled>◷</button>
       <button class="icon-button" id="fitRoute" title="Показать маршрут">⌖</button>
@@ -34,27 +34,7 @@
   </header>
 
   <section class="left-stack" id="leftStack">
-    <button type="button" class="mobile-expand-btn" id="mobileExpandToggle">🎛 Панель сценариев</button>
-    <article class="control-card glass">
-      <div class="card-heading">
-        <div><span class="eyebrow">Модель движения</span><h1>Скорость</h1></div>
-        <span class="run-state" id="runState">Остановлен</span>
-      </div>
-
-      <div class="speed-display">
-        <span id="speedValue">0</span><small>км/ч</small>
-        <div class="speed-secondary">GPS <b id="gpsSpeedValue">0</b> · CAN <b id="vehicleSpeedValue">0</b></div>
-      </div>
-      <input class="speed-range" id="speed" type="range" min="0" max="200" step="1" value="0">
-      <div class="range-scale"><span>0</span><span>50</span><span>100</span><span>150</span><span>200</span></div>
-
-      <div class="primary-actions">
-        <button class="primary" id="runButton"><span>▶</span> Запустить</button>
-        <button class="danger" id="stopButton"><span>■</span> Стоп</button>
-      </div>
-    </article>
-
-    <article class="mode-card glass">
+    <article class="mode-card glass" id="modeCard">
       <div class="card-heading compact"><div><span class="eyebrow">Источник позиции</span><h2>GPS-сценарий</h2></div></div>
       <div class="segmented" id="gpsMode">
         <button data-mode="fixed" class="active"><span>◎</span><b>Точка</b><small>Статичный GPS</small></button>
@@ -79,6 +59,27 @@
         <span><b>Fake Navigator Gateway</b><small>Проверка штатной подмены ГУ</small></span>
         <input type="checkbox" id="gatewayFake"><i></i>
       </label>
+    </article>
+
+    <button type="button" class="mobile-expand-btn" id="mobileExpandToggle">🎛 Панель сценариев</button>
+
+    <article class="control-card glass">
+      <div class="card-heading">
+        <div><span class="eyebrow">Модель движения</span><h1>Скорость</h1></div>
+        <span class="run-state" id="runState">Остановлен</span>
+      </div>
+
+      <div class="speed-display">
+        <span id="speedValue">0</span><small>км/ч</small>
+        <div class="speed-secondary">GPS <b id="gpsSpeedValue">0</b> · CAN <b id="vehicleSpeedValue">0</b></div>
+      </div>
+      <input class="speed-range" id="speed" type="range" min="0" max="200" step="1" value="0">
+      <div class="range-scale"><span>0</span><span>50</span><span>100</span><span>150</span><span>200</span></div>
+
+      <div class="primary-actions">
+        <button class="primary" id="runButton"><span>▶</span> Запустить</button>
+        <button class="danger" id="stopButton"><span>■</span> Стоп</button>
+      </div>
     </article>
   </section>
 
