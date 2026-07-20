@@ -473,7 +473,18 @@ class SimulationEngine:
         with self.lock:
             token = self.token
             base_url = self.gateway_url
-        result, status = gateway_request("/api/fake_nav", "POST", {"enabled": bool(enabled)}, token, base_url=base_url)
+            mode = self.gateway_mode
+            ha_url = self.ha_url
+            ha_token = self.ha_token
+        if mode == "ha":
+            cmd_payload = {"id": str(int(time.time() * 1000)), "action": "fake_nav", "value": {"enabled": bool(enabled)}}
+            result, status = ha_request("services/input_text/set_value", "POST",
+                                        {"entity_id": "input_text.x50_pending_command", "value": json.dumps(cmd_payload)},
+                                        ha_url=ha_url, ha_token=ha_token)
+            if status < 300:
+                result = {"enabled": bool(enabled), "mode": "queued_via_ha"}
+        else:
+            result, status = gateway_request("/api/fake_nav", "POST", {"enabled": bool(enabled)}, token, base_url=base_url)
         with self.lock:
             self.fake_nav = result if isinstance(result, dict) else {}
             self.gateway_online = status < 500
@@ -729,6 +740,9 @@ class SimulationEngine:
             odometer = self.odometer_km
             token = self.token
             base_url = self.gateway_url
+            mode = self.gateway_mode
+            ha_url = self.ha_url
+            ha_token = self.ha_token
             base_route_progress = self.route_progress_m
             projected_progress = self.route_progress_m + (
                 target * self.gps_speed_scale / 3.6 * delivery_ahead if running else 0.0)
@@ -736,9 +750,12 @@ class SimulationEngine:
                                    else self._route_coordinate(projected_progress))
             force_route_anchor = self.force_route_anchor_pending
         started = time.monotonic()
-        vehicle_result, vehicle_status = gateway_request(
-            "/api/simulator/vehicle", "POST",
-            {"enabled": running, "speed_kmh": vehicle_speed, "odometer_km": odometer}, token, base_url=base_url)
+        if mode == "ha":
+            vehicle_result, vehicle_status = {"ok": True}, 200
+        else:
+            vehicle_result, vehicle_status = gateway_request(
+                "/api/simulator/vehicle", "POST",
+                {"enabled": running, "speed_kmh": vehicle_speed, "odometer_km": odometer}, token, base_url=base_url)
         if coordinate is None:
             with self.lock:
                 self.gateway_online = vehicle_status < 500
@@ -750,7 +767,16 @@ class SimulationEngine:
                     "satellites": 12, "time_ms": epoch_ms, "emulator_native": True}
         if force_route_anchor:
             location["force_route_anchor"] = True
-        location_result, location_status = gateway_request("/api/location", "POST", location, token, base_url=base_url)
+        if mode == "ha":
+            cmd_payload = {"id": str(epoch_ms), "action": "location", "value": location}
+            location_result, location_status = ha_request(
+                "services/input_text/set_value", "POST",
+                {"entity_id": "input_text.x50_pending_command", "value": json.dumps(cmd_payload)},
+                ha_url=ha_url, ha_token=ha_token)
+            if location_status < 300:
+                location_result = {"ok": True, "fake_navigation_active": True}
+        else:
+            location_result, location_status = gateway_request("/api/location", "POST", location, token, base_url=base_url)
         final_coordinate = coordinate
         sample_progress = None
         phase_error_m = None

@@ -1,5 +1,11 @@
 const $ = id => document.getElementById(id);
-const API_BASE = location.pathname.startsWith('/x50-simulator/') ? '/x50-simulator' : '';
+const getApiBase = () => {
+  let path = location.pathname;
+  if (path.endsWith('.html')) path = path.substring(0, path.lastIndexOf('/'));
+  if (path.endsWith('/')) path = path.slice(0, -1);
+  return path;
+};
+const API_BASE = getApiBase();
 const map = L.map('map', {zoomControl:false, attributionControl:false}).setView([55.751244,37.618423], 12);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:20, subdomains:'abcd'}).addTo(map);
 
@@ -15,7 +21,7 @@ const staleHistoryPointLayer = L.layerGroup();
 let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null, routeLayerMode='both',showStalePoints=false,stateBusy=false,routeBusy=false,toastTimer,lastShownError=null;
 
 function toast(message, error=false){const el=$('toast');el.textContent=message;el.style.borderColor=error?'rgba(255,98,119,.45)':'';el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2400)}
-async function request(path, options={}){const response=await fetch(`${API_BASE}${path}`,{credentials:'include',headers:{'Content-Type':'application/json','X-X50-Client':'navigation-lab'},...options});const data=await response.json();if(!response.ok)throw new Error(data.detail||data.error||`HTTP ${response.status}`);return data}
+async function request(path, options={}){const response=await fetch(`${API_BASE}${path}`,{credentials:'include',headers:{'Content-Type':'application/json','X-X50-Client':'navigation-lab'},...options});const text=await response.text();let data;try{data=JSON.parse(text)}catch(err){if(!response.ok)throw new Error(`HTTP ${response.status}: ${text.slice(0,60)}`);throw new Error(`Ошибка ответа (${response.status}): ${text.slice(0,60)}`)}if(!response.ok)throw new Error(data.detail||data.error||`HTTP ${response.status}`);return data}
 async function control(patch, quiet=true){try{return await request('/api/controller/control',{method:'POST',body:JSON.stringify(patch)})}catch(error){if(!quiet)toast(error.message,true);throw error}}
 function number(id){return Number($(id).value)}
 function pct(id){return number(id)/100}
