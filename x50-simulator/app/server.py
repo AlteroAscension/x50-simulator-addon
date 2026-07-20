@@ -25,12 +25,13 @@ STATIC_FILES = {"/": "index.html", "/index.html": "index.html",
                 "/app.js": "app.js", "/styles.css": "styles.css"}
 
 
-def gateway_request(path: str, method: str = "GET", data=None, token="x50test"):
+def gateway_request(path: str, method: str = "GET", data=None, token="x50test", base_url=None):
+    target_base = (base_url or GATEWAY).rstrip('/')
     body = None if data is None else json.dumps(data).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if token:
         headers["X-X50-Token"] = token
-    request = Request(GATEWAY + path, data=body, headers=headers, method=method)
+    request = Request(target_base + path, data=body, headers=headers, method=method)
     try:
         with urlopen(request, timeout=4) as response:
             payload = response.read()
@@ -292,6 +293,7 @@ class SimulationEngine:
         self.speed_window = deque()
         self.trace = deque(maxlen=600)
         self.token = "x50test"
+        self.gateway_url = GATEWAY
         self.force_route_anchor_pending = False
         self.route_hook = LiveRouteHook(adb, device, os.environ.get("X50_ROUTE_AGENT"))
         self._last_integrate = time.monotonic()
@@ -336,6 +338,11 @@ class SimulationEngine:
                 self.pending_send = True
             if "token" in data and str(data["token"]).strip():
                 self.token = str(data["token"]).strip()
+            if "gateway_url" in data and str(data["gateway_url"]).strip():
+                url = str(data["gateway_url"]).strip().rstrip('/')
+                if not url.startswith("http://") and not url.startswith("https://"):
+                    url = "http://" + url
+                self.gateway_url = url
             if "latitude" in data and "longitude" in data:
                 lat = clamp(data["latitude"], -90, 90)
                 lon = clamp(data["longitude"], -180, 180)
@@ -381,6 +388,7 @@ class SimulationEngine:
                 "sent_count": self.sent_count,
                 "failed_count": self.failed_count,
                 "gateway_online": self.gateway_online,
+                "gateway_url": self.gateway_url,
                 "last_error": self.last_error,
                 "route_available": bool(self.route_points),
                 "route_revision": self.route_revision,
@@ -433,7 +441,8 @@ class SimulationEngine:
     def set_gateway_fake(self, enabled):
         with self.lock:
             token = self.token
-        result, status = gateway_request("/api/fake_nav", "POST", {"enabled": bool(enabled)}, token)
+            base_url = self.gateway_url
+        result, status = gateway_request("/api/fake_nav", "POST", {"enabled": bool(enabled)}, token, base_url=base_url)
         with self.lock:
             self.fake_nav = result if isinstance(result, dict) else {}
             self.gateway_online = status < 500
@@ -447,11 +456,12 @@ class SimulationEngine:
             return {"ok": False, "error": "invalid_route_source"}, 400
         with self.lock:
             token = self.token
+            base_url = self.gateway_url
         # Root-side staging runs every two seconds. Waiting for one complete
         # cycle makes the button read Navigator's current private files instead
         # of immediately re-decoding a potentially older staged copy.
         time.sleep(2.2)
-        result, status = gateway_request("/api/fake_nav/reload", "POST", {}, token)
+        result, status = gateway_request("/api/fake_nav/reload", "POST", {}, token, base_url=base_url)
         self._next_route_poll = 0.0
         self.wake.set()
         if status < 300:
@@ -513,7 +523,10 @@ class SimulationEngine:
                     self.pending_send = True
 
     def _poll_route(self):
-        result, status = gateway_request("/api/fake_nav/route", token=self.token)
+        with self.lock:
+            token = self.token
+            base_url = self.gateway_url
+        result, status = gateway_request("/api/fake_nav/route", token=token, base_url=base_url)
         with self.lock:
             self.gateway_online = status < 500
             if status >= 300:
@@ -601,7 +614,10 @@ class SimulationEngine:
         self.trace.clear()
 
     def _poll_status(self):
-        result, status = gateway_request("/api/fake_nav", token=self.token)
+        with self.lock:
+            token = self.token
+            base_url = self.gateway_url
+        result, status = gateway_request("/api/fake_nav", token=token, base_url=base_url)
         with self.lock:
             self.gateway_online = status < 500
             if status < 300:
@@ -681,6 +697,7 @@ class SimulationEngine:
             gps_speed = target * self.gps_speed_scale if running else 0.0
             odometer = self.odometer_km
             token = self.token
+            base_url = self.gateway_url
             base_route_progress = self.route_progress_m
             projected_progress = self.route_progress_m + (
                 target * self.gps_speed_scale / 3.6 * delivery_ahead if running else 0.0)
@@ -690,7 +707,7 @@ class SimulationEngine:
         started = time.monotonic()
         vehicle_result, vehicle_status = gateway_request(
             "/api/simulator/vehicle", "POST",
-            {"enabled": running, "speed_kmh": vehicle_speed, "odometer_km": odometer}, token)
+            {"enabled": running, "speed_kmh": vehicle_speed, "odometer_km": odometer}, token, base_url=base_url)
         if coordinate is None:
             with self.lock:
                 self.gateway_online = vehicle_status < 500
@@ -702,7 +719,7 @@ class SimulationEngine:
                     "satellites": 12, "time_ms": epoch_ms, "emulator_native": True}
         if force_route_anchor:
             location["force_route_anchor"] = True
-        location_result, location_status = gateway_request("/api/location", "POST", location, token)
+        location_result, location_status = gateway_request("/api/location", "POST", location, token, base_url=base_url)
         final_coordinate = coordinate
         sample_progress = None
         phase_error_m = None
@@ -878,7 +895,8 @@ class Handler(SimpleHTTPRequestHandler):
             data = self.read_json()
             data["emulator_native"] = True
             payload, status = gateway_request("/api/location", "POST", data,
-                                              self.headers.get("X-X50-Token", "x50test"))
+                                              self.headers.get("X-X50-Token", "x50test"),
+                                              base_url=self.engine.gateway_url)
             self.reply_json(payload, status)
         else:
             self.proxy()
@@ -891,7 +909,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.path
         data = self.read_json() if self.command == "POST" else None
         payload, status = gateway_request(path, self.command, data,
-                                          self.headers.get("X-X50-Token", "x50test"))
+                                          self.headers.get("X-X50-Token", "x50test"),
+                                          base_url=self.engine.gateway_url)
         self.reply_json(payload, status)
 
     def reply_json(self, payload, status=200):

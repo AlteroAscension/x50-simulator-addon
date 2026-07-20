@@ -19,7 +19,7 @@
       <div><strong>Navigation Lab</strong><span>асинхронный стенд AVD</span></div>
     </div>
     <div class="top-status">
-      <span class="chip" id="gatewayChip"><i></i><span>Gateway</span></span>
+      <span class="chip" id="gatewayChip" style="cursor:pointer;" title="Нажмите для смены адреса X50 Gateway"><i></i><span>Gateway</span></span>
       <span class="chip" id="routeChip"><i></i><span>Маршрут —</span></span>
       <div class="layer-switch" id="routeLayers" title="Слои захваченного маршрута">
         <button data-layer="points">Точки</button>
@@ -97,6 +97,14 @@
 
     <label class="wide-field"><span>Одометр, км</span><input id="odometer" type="number" min="0" step="0.001" value="0"></label>
     <label class="wide-field"><span>Тестовый токен</span><input id="token" type="password" autocomplete="off" value="x50test"></label>
+    <div class="wide-field" style="margin-top:9px;">
+      <span>Адрес X50 Gateway</span>
+      <div style="display:flex;gap:6px;margin:6px 0 6px;">
+        <button type="button" class="small-button" id="setGwavd" style="font-size:10px;padding:6px 8px;">💻 AVD (127.0.0.1)</button>
+        <button type="button" class="small-button" id="setGwhu" style="font-size:10px;padding:6px 8px;">🚗 ГУ (192.168.66.124)</button>
+      </div>
+      <input id="gatewayUrl" type="text" placeholder="http://192.168.66.124:8080" value="http://127.0.0.1:8080" style="font-size:12px;">
+    </div>
 
     <div class="route-control">
       <div><span>Прогресс маршрута</span><strong id="routeProgressText">0 / 0 км</strong></div>
