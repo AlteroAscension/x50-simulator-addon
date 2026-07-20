@@ -27,28 +27,74 @@
 }
 @media(max-width:850px){.left-stack{bottom:88px}.settings-panel{bottom:88px}.layer-switch button{font-size:0;width:25px;padding:0}.layer-switch button:after{font-size:11px}.layer-switch button[data-layer="points"]:after{content:'•'}.layer-switch button[data-layer="line"]:after{content:'╱'}.layer-switch button[data-layer="both"]:after{content:'•╱'}}
 @media(max-width:650px){
-  .topbar{left:8px;right:8px;top:8px;height:52px;padding:6px 10px;border-radius:16px}
-  .brand-mark{width:34px;height:34px;font-size:11px}
+  .topbar{left:8px;right:8px;top:8px;height:48px;padding:4px 8px;border-radius:14px}
+  .brand-mark{width:32px;height:32px;font-size:11px;border-radius:9px}
   .brand span{display:none}
-  .brand strong{font-size:14px}
-  .chip{height:34px;padding:0 9px;font-size:11px}
-  .icon-button{width:34px;height:34px;font-size:15px}
-  .layer-switch{height:34px}
-  .top-status .chip:nth-child(2){display:none}
-  .mobile-expand-btn{display:block;width:100%;padding:7px 12px;border-radius:12px;background:rgba(255,255,255,.08);border:1px dashed var(--line);color:var(--cyan);font-size:11px;font-weight:750;text-align:center;cursor:pointer}
+  .brand strong{font-size:13px}
+  .chip{height:30px;padding:0 7px;font-size:10px;border-radius:9px}
+  .icon-button{width:30px;height:30px;font-size:14px;border-radius:9px}
+  .layer-switch{height:30px;padding:2px}
+  .layer-switch button{height:26px;padding:0 5px;font-size:9px}
+  .stale-toggle{display:none}
+  .telemetry{display:none!important}
   
-  .left-stack{position:fixed;left:8px;right:8px;bottom:76px;top:auto;width:auto;max-height:calc(100vh - 140px);z-index:550;display:flex;flex-direction:column;gap:8px}
+  .mobile-expand-btn{
+    display:flex!important;align-items:center;justify-content:center;gap:6px;
+    width:100%;height:32px;padding:0 12px;border-radius:10px;
+    background:linear-gradient(135deg,rgba(59,214,255,.16),rgba(38,136,255,.16));
+    border:1px solid rgba(59,214,255,.3);color:var(--cyan);
+    font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;
+    cursor:pointer;margin-bottom:4px
+  }
+  
+  .left-stack{
+    position:fixed;left:8px;right:8px;bottom:8px;top:auto;width:auto;
+    max-height:85vh;z-index:550;display:flex;flex-direction:column;gap:6px;
+    transition:transform .24s ease
+  }
+  
   .left-stack:not(.expanded) .mode-card{display:none!important}
-  .left-stack:not(.expanded) .control-card{padding:10px 14px;border-radius:18px}
-  .left-stack:not(.expanded) .speed-display{padding:2px 0;display:flex;align-items:center;justify-content:space-around}
-  .left-stack:not(.expanded) .speed-display>span{font-size:36px;line-height:1}
-  .left-stack:not(.expanded) .range-scale{display:none}
-  .left-stack:not(.expanded) .speed-secondary{margin-top:0}
-  .left-stack:not(.expanded) .primary-actions{margin-top:8px}
   
-  .telemetry{left:8px;right:8px;bottom:8px;top:auto;height:62px;border-radius:14px;padding:6px 10px;grid-template-columns:1fr 1fr;z-index:540}
-  .telemetry .metric:nth-child(3),.telemetry .metric:nth-child(4),.telemetry .metric:nth-child(5){display:none}
-  .settings-panel{inset:68px 8px 76px;width:auto;background:var(--glass-strong);overflow:auto}
-  .close-settings{display:block}
+  /* Compact Speed Dock on Mobile */
+  .control-card{padding:10px 12px!important;border-radius:16px!important}
+  .card-heading{margin-bottom:4px}
+  .card-heading h1{font-size:14px}
+  .eyebrow{font-size:8px;margin-bottom:1px}
+  .run-state{font-size:9px;padding:3px 6px;border-radius:6px}
+  
+  .speed-display{
+    display:flex!important;align-items:center;justify-content:space-between;
+    padding:2px 0 6px!important;gap:8px
+  }
+  .speed-display>span{font-size:32px!important;line-height:1!important}
+  .speed-display>small{font-size:11px!important;margin-left:2px}
+  .speed-secondary{font-size:10px!important;margin-top:0!important;white-space:nowrap}
+  
+  .speed-range{margin:2px 0!important}
+  .range-scale{display:none!important}
+  
+  .primary-actions{
+    grid-template-columns:1fr 1fr!important;gap:6px!important;margin-top:6px!important
+  }
+  button.primary,button.danger{padding:8px 10px!important;font-size:12px!important;border-radius:10px!important}
+  
+  /* Mode Card Drawer styling */
+  .mode-card{
+    padding:12px!important;border-radius:16px!important;
+    max-height:60vh;overflow-y:auto;overscroll-behavior:contain;
+    background:var(--glass-strong)!important
+  }
+  .segmented{margin-top:8px!important;gap:5px!important}
+  .segmented button{padding:6px 8px!important;border-radius:10px!important}
+  .segmented button>span{font-size:14px!important}
+  .segmented b{font-size:11px!important}
+  .segmented small{font-size:8px!important}
+  .point-legend{margin-top:6px!important;font-size:8px!important;gap:8px!important}
+  .point-refresh-actions{gap:4px!important;margin-top:6px!important}
+  .source-refresh{padding:6px 4px!important;font-size:8px!important}
+  .coordinate-row{margin-top:8px!important;padding-top:8px!important}
+  .switch-row{margin-top:8px!important}
+
+  .settings-panel{inset:60px 8px 8px!important;width:auto!important;border-radius:18px!important;background:var(--glass-strong)!important}
 }
 @media(max-height:560px){.brand>div:last-child{display:none}.left-stack{width:300px}.speed-display>span{font-size:38px}.range-scale,.speed-secondary{display:none}.telemetry{height:58px;padding:6px 10px}.metric>strong{margin:2px 0}.left-stack,.settings-panel{bottom:78px}}
