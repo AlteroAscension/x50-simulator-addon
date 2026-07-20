@@ -135,6 +135,11 @@ $('gatewayChip').addEventListener('click',()=>{$('settingsPanel').classList.add(
 $('setGwavd').addEventListener('click',()=>{$('gatewayUrl').value='http://127.0.0.1:8080';queueControl({gateway_mode:'direct',gateway_url:'http://127.0.0.1:8080'});toast('Выбран режим: 💻 AVD (127.0.0.1)')});
 $('setGwhu').addEventListener('click',()=>{$('gatewayUrl').value='http://192.168.66.124:8080';queueControl({gateway_mode:'direct',gateway_url:'http://192.168.66.124:8080'});toast('Выбран режим: 🚗 ГУ Direct (192.168.66.124)')});
 $('setGwha').addEventListener('click',()=>{$('gatewayUrl').value='http://supervisor/core';queueControl({gateway_mode:'ha',ha_url:$('haUrl').value||'http://supervisor/core'});toast('Выбран режим: 🌐 HA / Internet (через Home Assistant API)')});
+$('mobileExpandToggle').addEventListener('click', () => {
+  const stack = $('leftStack');
+  const expanded = stack.classList.toggle('expanded');
+  $('mobileExpandToggle').textContent = expanded ? '▲ Свернуть панель' : '🎛 Панель сценариев';
+});
 $('routeProgress').addEventListener('input',()=>{$('routeProgressText').textContent=`${(number('routeProgress')/1000).toFixed(2)} / ${state?(state.route_length_m/1000).toFixed(1):0} км`});
 $('routeProgress').addEventListener('change',()=>control({route_progress_m:number('routeProgress')},false).catch(()=>{}));
 $('reloadExact').addEventListener('click',()=>refreshRouteSources('exact'));

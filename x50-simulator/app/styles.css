@@ -20,11 +20,35 @@
 .point-legend{display:flex;gap:11px;margin-top:9px;color:var(--muted);font-size:9px}.point-legend span{display:flex;align-items:center;gap:4px}.point-legend i{width:8px;height:8px;border-radius:50%;display:inline-block}.point-legend b{color:var(--text)}.exact-dot{background:#39efa0;box-shadow:0 0 0 1px #e1fff1,0 0 8px rgba(57,239,160,.55)}.guidance-dot{background:#28cfff;box-shadow:0 0 0 1px #dff8ff}.history-dot{background:#ffad32;box-shadow:0 0 0 1px #ffdc83}.stale-dot{background:#ff5268}.stale-legend{opacity:.45}.stale-legend.visible{opacity:1}
 .point-refresh-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px}.source-refresh{border:1px solid var(--line);border-radius:10px;padding:7px 8px;background:rgba(255,255,255,.055);color:#bdd0e2;font-size:9px;font-weight:750;cursor:pointer;transition:.18s}.source-refresh:hover{background:rgba(255,255,255,.11);transform:translateY(-1px)}.source-refresh:disabled{opacity:.45;cursor:wait;transform:none}.exact-refresh{color:#8dffc5;border-color:rgba(57,239,160,.25);background:rgba(57,239,160,.08)}
 
+.mobile-expand-btn{display:none}
+
 @media(max-height:780px){
   .topbar{top:10px;height:56px}.brand-mark{width:36px;height:36px}.left-stack{top:76px;bottom:96px;gap:8px}.control-card,.mode-card{padding:12px}.speed-display{padding:5px 0 3px}.speed-display>span{font-size:46px}.primary-actions{margin-top:8px}.segmented{margin-top:8px}.segmented button{padding:7px}.coordinate-row{margin-top:8px;padding-top:8px}.switch-row{margin-top:8px}.telemetry{bottom:10px;height:76px}.settings-panel{top:76px;bottom:96px}
 }
 @media(max-width:850px){.left-stack{bottom:88px}.settings-panel{bottom:88px}.layer-switch button{font-size:0;width:25px;padding:0}.layer-switch button:after{font-size:11px}.layer-switch button[data-layer="points"]:after{content:'•'}.layer-switch button[data-layer="line"]:after{content:'╱'}.layer-switch button[data-layer="both"]:after{content:'•╱'}}
-@media(max-width:560px){
-  .topbar{height:56px}.left-stack{top:76px;bottom:88px;display:grid}.mode-card{display:block}.control-card,.mode-card{padding:12px}.telemetry{height:68px}.top-status{gap:4px}.top-status .chip{display:none}.icon-button{width:34px;height:34px}.layer-switch{height:34px}.settings-panel{inset:76px 10px 88px}
+@media(max-width:650px){
+  .topbar{left:8px;right:8px;top:8px;height:52px;padding:6px 10px;border-radius:16px}
+  .brand-mark{width:34px;height:34px;font-size:11px}
+  .brand span{display:none}
+  .brand strong{font-size:14px}
+  .chip{height:34px;padding:0 9px;font-size:11px}
+  .icon-button{width:34px;height:34px;font-size:15px}
+  .layer-switch{height:34px}
+  .top-status .chip:nth-child(2){display:none}
+  .mobile-expand-btn{display:block;width:100%;padding:7px 12px;border-radius:12px;background:rgba(255,255,255,.08);border:1px dashed var(--line);color:var(--cyan);font-size:11px;font-weight:750;text-align:center;cursor:pointer}
+  
+  .left-stack{position:fixed;left:8px;right:8px;bottom:76px;top:auto;width:auto;max-height:calc(100vh - 140px);z-index:550;display:flex;flex-direction:column;gap:8px}
+  .left-stack:not(.expanded) .mode-card{display:none!important}
+  .left-stack:not(.expanded) .control-card{padding:10px 14px;border-radius:18px}
+  .left-stack:not(.expanded) .speed-display{padding:2px 0;display:flex;align-items:center;justify-content:space-around}
+  .left-stack:not(.expanded) .speed-display>span{font-size:36px;line-height:1}
+  .left-stack:not(.expanded) .range-scale{display:none}
+  .left-stack:not(.expanded) .speed-secondary{margin-top:0}
+  .left-stack:not(.expanded) .primary-actions{margin-top:8px}
+  
+  .telemetry{left:8px;right:8px;bottom:8px;top:auto;height:62px;border-radius:14px;padding:6px 10px;grid-template-columns:1fr 1fr;z-index:540}
+  .telemetry .metric:nth-child(3),.telemetry .metric:nth-child(4),.telemetry .metric:nth-child(5){display:none}
+  .settings-panel{inset:68px 8px 76px;width:auto;background:var(--glass-strong);overflow:auto}
+  .close-settings{display:block}
 }
 @media(max-height:560px){.brand>div:last-child{display:none}.left-stack{width:300px}.speed-display>span{font-size:38px}.range-scale,.speed-secondary{display:none}.telemetry{height:58px;padding:6px 10px}.metric>strong{margin:2px 0}.left-stack,.settings-panel{bottom:78px}}
