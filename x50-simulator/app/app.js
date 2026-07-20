@@ -35,7 +35,7 @@ function setRouteLayer(mode){
 function setStalePoints(show){showStalePoints=show;$('stalePointsToggle').classList.toggle('active',show);setRouteLayer(routeLayerMode);persist({showStalePoints:show})}
 function fillPointLayer(layer,points,style){layer.clearLayers();for(const p of points)L.circleMarker([p[0],p[1]],{renderer:rawRenderer,interactive:false,...style}).addTo(layer)}
 
-function calibrationPatch(){persist();return {vehicle_speed_scale:pct('vehicleScale'),odometer_scale:pct('odoScale'),gps_speed_scale:pct('gpsScale'),gps_hz:number('gpsHz'),token:$('token').value,gateway_url:$('gatewayUrl').value,odometer_km:number('odometer')}}
+function calibrationPatch(){persist();return {vehicle_speed_scale:pct('vehicleScale'),odometer_scale:pct('odoScale'),gps_speed_scale:pct('gpsScale'),gps_hz:number('gpsHz'),token:$('token').value,gateway_url:$('gatewayUrl').value,ha_url:$('haUrl').value,ha_token:$('haToken').value,odometer_km:number('odometer')}}
 let controlTimer;
 function queueControl(patch){clearTimeout(controlTimer);controlTimer=setTimeout(()=>control({...calibrationPatch(),...patch}).catch(()=>{}),70)}
 
@@ -50,9 +50,12 @@ function updateState(next){state=next;
   $('odoValue').textContent=next.odometer_km.toFixed(3);$('odoBias').textContent=`×${next.odometer_scale.toFixed(3)}`;
   if(document.activeElement!==$('odometer'))$('odometer').value=next.odometer_km.toFixed(3);
   if(document.activeElement!==$('gatewayUrl')&&next.gateway_url)$('gatewayUrl').value=next.gateway_url;
+  if(document.activeElement!==$('haUrl')&&next.ha_url)$('haUrl').value=next.ha_url;
+  if(document.activeElement!==$('haToken')&&next.ha_token!=null)$('haToken').value=next.ha_token;
   $('sentCount').textContent=next.sent_count;$('failedCount').textContent=next.failed_count;
   $('gatewayChip').classList.toggle('online',next.gateway_online);$('gatewayChip').classList.toggle('warn',!next.gateway_online);
-  const gwHost=(next.gateway_url||'127.0.0.1:8080').replace(/^https?:\/\//,'');
+  const isHa=next.gateway_mode==='ha';
+  const gwHost=isHa?'🌐 HA Queue':(next.gateway_url||'127.0.0.1:8080').replace(/^https?:\/\//,'');
   $('gatewayChip').querySelector('span').textContent=next.gateway_online?`GW (${gwHost})`:`GW off (${gwHost})`;
   $('routeChip').classList.toggle('online',next.route_available);$('routeChip').querySelector('span').textContent=next.route_available?`${next.route_source==='exact'?'MapKit exact':'Маршрут'} ${(next.route_length_m/1000).toFixed(1)} км`:'Маршрут —';
   $('routeSummary').textContent=next.route_available?`${(next.route_progress_m/1000).toFixed(2)} / ${(next.route_length_m/1000).toFixed(1)} км`:'Ожидание захвата';
@@ -121,10 +124,11 @@ $('stopButton').addEventListener('click',()=>control({running:false},false).then
 $('sendNow').addEventListener('click',()=>control({send_now:true,odometer_km:number('odometer')},false).then(()=>toast('Состояние отправлено')).catch(()=>{}));
 document.querySelectorAll('#gpsMode button').forEach(button=>button.addEventListener('click',()=>control({gps_mode:button.dataset.mode},false).then(()=>toast(button.dataset.mode==='route'?'FakeGPS по маршруту':'Статичная GPS-точка')).catch(()=>{})));
 $('gatewayFake').addEventListener('change',async event=>{try{await request('/api/controller/fake-nav',{method:'POST',body:JSON.stringify({enabled:event.target.checked})});toast(`Gateway Fake ${event.target.checked?'включён':'выключен'}`)}catch(error){event.target.checked=!event.target.checked;toast(error.message,true)}});
-['vehicleScale','odoScale','gpsScale','gpsHz','odometer','token','gatewayUrl'].forEach(id=>$(id).addEventListener('change',()=>queueControl({})));
+['vehicleScale','odoScale','gpsScale','gpsHz','odometer','token','gatewayUrl','haUrl','haToken'].forEach(id=>$(id).addEventListener('change',()=>queueControl({})));
 $('gatewayChip').addEventListener('click',()=>{$('settingsPanel').classList.add('open');$('gatewayUrl').focus()});
-$('setGwavd').addEventListener('click',()=>{$('gatewayUrl').value='http://127.0.0.1:8080';queueControl({gateway_url:'http://127.0.0.1:8080'});toast('Выбран Gateway: AVD (127.0.0.1)')});
-$('setGwhu').addEventListener('click',()=>{$('gatewayUrl').value='http://192.168.66.124:8080';queueControl({gateway_url:'http://192.168.66.124:8080'});toast('Выбран Gateway: ГУ (192.168.66.124)')});
+$('setGwavd').addEventListener('click',()=>{$('gatewayUrl').value='http://127.0.0.1:8080';queueControl({gateway_mode:'direct',gateway_url:'http://127.0.0.1:8080'});toast('Выбран режим: 💻 AVD (127.0.0.1)')});
+$('setGwhu').addEventListener('click',()=>{$('gatewayUrl').value='http://192.168.66.124:8080';queueControl({gateway_mode:'direct',gateway_url:'http://192.168.66.124:8080'});toast('Выбран режим: 🚗 ГУ Direct (192.168.66.124)')});
+$('setGwha').addEventListener('click',()=>{$('gatewayUrl').value='http://supervisor/core';queueControl({gateway_mode:'ha',ha_url:$('haUrl').value||'http://supervisor/core'});toast('Выбран режим: 🌐 HA / Internet (через Home Assistant API)')});
 $('routeProgress').addEventListener('input',()=>{$('routeProgressText').textContent=`${(number('routeProgress')/1000).toFixed(2)} / ${state?(state.route_length_m/1000).toFixed(1):0} км`});
 $('routeProgress').addEventListener('change',()=>control({route_progress_m:number('routeProgress')},false).catch(()=>{}));
 $('reloadExact').addEventListener('click',()=>refreshRouteSources('exact'));

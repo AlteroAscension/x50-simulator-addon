@@ -98,12 +98,18 @@
     <label class="wide-field"><span>Одометр, км</span><input id="odometer" type="number" min="0" step="0.001" value="0"></label>
     <label class="wide-field"><span>Тестовый токен</span><input id="token" type="password" autocomplete="off" value="x50test"></label>
     <div class="wide-field" style="margin-top:9px;">
-      <span>Адрес X50 Gateway</span>
-      <div style="display:flex;gap:6px;margin:6px 0 6px;">
-        <button type="button" class="small-button" id="setGwavd" style="font-size:10px;padding:6px 8px;">💻 AVD (127.0.0.1)</button>
-        <button type="button" class="small-button" id="setGwhu" style="font-size:10px;padding:6px 8px;">🚗 ГУ (192.168.66.124)</button>
+      <span>Режим связи и Gateway</span>
+      <div style="display:flex;gap:5px;margin:6px 0 6px;flex-wrap:wrap;">
+        <button type="button" class="small-button" id="setGwavd" style="font-size:9px;padding:5px 7px;">💻 AVD (127.0.0.1)</button>
+        <button type="button" class="small-button" id="setGwhu" style="font-size:9px;padding:5px 7px;">🚗 ГУ (192.168.66.124)</button>
+        <button type="button" class="small-button" id="setGwha" style="font-size:9px;padding:5px 7px;background:rgba(56,226,139,.18);color:#8dffc5;">🌐 HA / Internet</button>
       </div>
       <input id="gatewayUrl" type="text" placeholder="http://192.168.66.124:8080" value="http://127.0.0.1:8080" style="font-size:12px;">
+    </div>
+    <div class="wide-field" id="haConfigGroup" style="margin-top:9px;">
+      <span>Home Assistant API (для HA / Internet)</span>
+      <input id="haUrl" type="text" placeholder="http://supervisor/core" value="http://supervisor/core" style="font-size:11px;margin-top:4px;">
+      <input id="haToken" type="password" placeholder="Supervisor Token (авто в аддоне)" value="" style="font-size:11px;margin-top:4px;">
     </div>
 
     <div class="route-control">

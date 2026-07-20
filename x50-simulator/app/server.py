@@ -46,6 +46,22 @@ def gateway_request(path: str, method: str = "GET", data=None, token="x50test", 
         return {"ok": False, "error": "gateway_unreachable", "detail": str(error)}, 502
 
 
+def ha_request(endpoint: str, method: str = "POST", data=None, ha_url=None, ha_token=None):
+    base = (ha_url or os.environ.get("HA_URL", "http://supervisor/core")).rstrip('/')
+    token = ha_token or os.environ.get("SUPERVISOR_TOKEN", "")
+    body = None if data is None else json.dumps(data).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(f"{base}/api/{endpoint.lstrip('/')}", data=body, headers=headers, method=method)
+    try:
+        with urlopen(request, timeout=5) as response:
+            payload = response.read()
+            return json.loads(payload) if payload else {"ok": True}, response.status
+    except Exception as error:
+        return {"ok": False, "error": "ha_unreachable", "detail": str(error)}, 502
+
+
 def clamp(value, low, high):
     return max(low, min(high, float(value)))
 
@@ -294,6 +310,9 @@ class SimulationEngine:
         self.trace = deque(maxlen=600)
         self.token = "x50test"
         self.gateway_url = GATEWAY
+        self.gateway_mode = os.environ.get("X50_GATEWAY_MODE", "direct")
+        self.ha_url = os.environ.get("HA_URL", "http://supervisor/core")
+        self.ha_token = os.environ.get("SUPERVISOR_TOKEN", "")
         self.force_route_anchor_pending = False
         self.route_hook = LiveRouteHook(adb, device, os.environ.get("X50_ROUTE_AGENT"))
         self._last_integrate = time.monotonic()
@@ -343,6 +362,15 @@ class SimulationEngine:
                 if not url.startswith("http://") and not url.startswith("https://"):
                     url = "http://" + url
                 self.gateway_url = url
+            if "gateway_mode" in data and str(data["gateway_mode"]) in ("direct", "ha"):
+                self.gateway_mode = str(data["gateway_mode"])
+            if "ha_url" in data and str(data["ha_url"]).strip():
+                url = str(data["ha_url"]).strip().rstrip('/')
+                if not url.startswith("http://") and not url.startswith("https://"):
+                    url = "http://" + url
+                self.ha_url = url
+            if "ha_token" in data:
+                self.ha_token = str(data["ha_token"]).strip()
             if "latitude" in data and "longitude" in data:
                 lat = clamp(data["latitude"], -90, 90)
                 lon = clamp(data["longitude"], -180, 180)
@@ -389,6 +417,9 @@ class SimulationEngine:
                 "failed_count": self.failed_count,
                 "gateway_online": self.gateway_online,
                 "gateway_url": self.gateway_url,
+                "gateway_mode": self.gateway_mode,
+                "ha_url": self.ha_url,
+                "ha_token": self.ha_token,
                 "last_error": self.last_error,
                 "route_available": bool(self.route_points),
                 "route_revision": self.route_revision,
