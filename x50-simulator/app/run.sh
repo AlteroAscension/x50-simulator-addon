@@ -18,13 +18,13 @@ fi
 
 echo "[X50 Add-on] Starting X50 Navigation Simulator..."
 
-if [ "$ADB_ENABLED" = "true" ] && [ -n "$ADB_HOST" ]; then
-    echo "[X50 Add-on] Connecting ADB to ${ADB_HOST}:${ADB_PORT}..."
-    adb connect "${ADB_HOST}:${ADB_PORT}" || true
-fi
-
 export X50_GATEWAY_URL="$GATEWAY_URL"
 export X50_TOKEN="$GATEWAY_TOKEN"
+
+if [ "$ADB_ENABLED" = "true" ] && [ -n "$ADB_HOST" ]; then
+    echo "[X50 Add-on] Connecting ADB in background to ${ADB_HOST}:${ADB_PORT}..."
+    (sleep 1 && adb connect "${ADB_HOST}:${ADB_PORT}") >/dev/null 2>&1 &
+fi
 
 echo "[X50 Add-on] Launching web controller on port 8090..."
 exec python3 /app/server.py --port 8090
