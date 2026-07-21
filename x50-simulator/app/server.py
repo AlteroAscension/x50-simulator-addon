@@ -271,6 +271,7 @@ class SimulationEngine:
         self.exact_route_available = False
         self.exact_route_id = ""
         self.exact_route_phase = ""
+        self.mapkit_route = {}
         self.route_source_revision = ""
         self.history_fresh = True
         self.history_time_fresh = True
@@ -458,6 +459,7 @@ class SimulationEngine:
                     "exact_available": self.exact_route_available,
                     "exact_route_id": self.exact_route_id,
                     "exact_phase": self.exact_route_phase,
+                    "mapkit_route": self.mapkit_route,
                     "history_fresh": self.history_fresh,
                     "history_time_fresh": self.history_time_fresh,
                     "history_match_ratio": self.history_match_ratio,
@@ -590,6 +592,7 @@ class SimulationEngine:
                 self.exact_route_available = bool(result.get("exact_available", False))
                 self.exact_route_id = str(result.get("exact_route_id", ""))
                 self.exact_route_phase = str(result.get("exact_phase", ""))
+                self.mapkit_route = dict(result.get("mapkit_route") or {})
                 self.route_source_revision = str(result.get("source_revision", "unavailable"))
                 return
             points = []
@@ -610,6 +613,11 @@ class SimulationEngine:
             history_points = parse_points("history_points")
             stale_history_points = parse_points("stale_history_points")
             exact_points = parse_points("exact_points")
+            self.mapkit_route = dict(result.get("mapkit_route") or {})
+            self.exact_route_fresh = bool(result.get("exact_fresh", False))
+            self.exact_route_available = bool(result.get("exact_available", False))
+            self.exact_route_id = str(result.get("exact_route_id", ""))
+            self.exact_route_phase = str(result.get("exact_phase", ""))
             revision = result.get("revision", 0)
             source_revision = str(result.get("source_revision", revision))
             if len(points) >= 2 and (revision != self.route_revision
@@ -619,10 +627,6 @@ class SimulationEngine:
                 self._reset_gateway_output_locked("route geometry changed")
                 self.route_source = str(result.get("route_source", "unknown"))
                 self.exact_route_points = exact_points
-                self.exact_route_fresh = bool(result.get("exact_fresh", False))
-                self.exact_route_available = bool(result.get("exact_available", False))
-                self.exact_route_id = str(result.get("exact_route_id", ""))
-                self.exact_route_phase = str(result.get("exact_phase", ""))
                 self.display_route_points = exact_points or points
                 self.route_points = list(points) if self.route_source == "exact" else self._smooth_route(points)
                 self.raw_route_points = raw_points or list(points)

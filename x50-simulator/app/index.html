@@ -61,6 +61,19 @@
       </label>
     </article>
 
+    <article class="mapkit-card glass" id="mapkitCard">
+      <div class="mapkit-heading"><div><span class="eyebrow">Данные живого DrivingRoute</span><strong>MapKit <b id="mapkitSchema">—</b></strong></div><span id="mapkitDataState">Ожидание v2</span></div>
+      <div class="mapkit-grid">
+        <span><b id="speedLimitCount">0</b><small>лимитов</small></span>
+        <span><b id="eventCount">0</b><small>событий</small></span>
+        <span><b id="trafficLightCount">0</b><small>светофоров</small></span>
+        <span><b id="speedBumpCount">0</b><small>неровностей</small></span>
+        <span><b id="crossingCount">0</b><small>переходов</small></span>
+        <span><b id="laneCount">0</b><small>схем полос</small></span>
+        <span><b id="jamCount">0</b><small>пробок</small></span>
+      </div>
+    </article>
+
     <button type="button" class="mobile-expand-btn" id="mobileExpandToggle">🎛 Панель сценариев</button>
 
     <article class="control-card glass">
@@ -131,6 +144,6 @@
 
   <div class="toast" id="toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=20260719-exact-mapkit-route2"></script>
+  <script src="app.js?v=20260721-mapkit-metadata-v2"></script>
 </body>
 </html>

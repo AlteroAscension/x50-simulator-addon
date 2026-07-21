@@ -21,6 +21,7 @@
 .point-refresh-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px}.source-refresh{border:1px solid var(--line);border-radius:10px;padding:7px 8px;background:rgba(255,255,255,.055);color:#bdd0e2;font-size:9px;font-weight:750;cursor:pointer;transition:.18s}.source-refresh:hover{background:rgba(255,255,255,.11);transform:translateY(-1px)}.source-refresh:disabled{opacity:.45;cursor:wait;transform:none}.exact-refresh{color:#8dffc5;border-color:rgba(57,239,160,.25);background:rgba(57,239,160,.08)}
 
 .mobile-expand-btn{display:none}
+.mapkit-card{border-radius:18px;padding:11px 13px}.mapkit-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.mapkit-heading strong{font-size:12px}.mapkit-heading strong b{color:var(--green);font-size:9px}.mapkit-heading>span{color:var(--green);font-size:9px}.mapkit-heading>span.warn{color:var(--amber)}.mapkit-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:8px}.mapkit-grid>span{padding:6px 4px;border:1px solid var(--line);border-radius:9px;text-align:center;background:rgba(255,255,255,.025)}.mapkit-grid b{display:block;font-size:12px}.mapkit-grid small{display:block;color:var(--muted);font-size:7px;margin-top:1px}.road-object{background:transparent!important;border:0!important}.road-object span{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#15283b;border:2px solid #fff;color:#fff;font-size:10px;font-weight:900;box-shadow:0 3px 12px rgba(0,0,0,.5)}.road-object.camera span{background:#ef5269}.road-object.light span{background:#ffbd4a;color:#17202a}.road-object.bump span{background:#9b72ff}.road-object.crossing span{background:#2688ff}
 
 @media(max-height:780px){
   .topbar{top:10px;height:56px}.brand-mark{width:36px;height:36px}.left-stack{top:76px;bottom:96px;gap:8px}.control-card,.mode-card{padding:12px}.speed-display{padding:5px 0 3px}.speed-display>span{font-size:46px}.primary-actions{margin-top:8px}.segmented{margin-top:8px}.segmented button{padding:7px}.coordinate-row{margin-top:8px;padding-top:8px}.switch-row{margin-top:8px}.telemetry{bottom:10px;height:76px}.settings-panel{top:76px;bottom:96px}
@@ -57,8 +58,8 @@
     transition:transform .24s ease
   }
   
-  .left-stack:not(.expanded) .mode-card{display:none!important}
-  .left-stack.expanded .mode-card{
+  .left-stack:not(.expanded) .mode-card,.left-stack:not(.expanded) .mapkit-card{display:none!important}
+  .left-stack.expanded .mode-card,.left-stack.expanded .mapkit-card{
     display:block!important;
     order:-1;
     margin-bottom:4px;

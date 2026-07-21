@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0
+
+- Added end-to-end `x50.exact-route.v2` and `mapkit_route` support.
+- Loaded legal speed limits and live jam speeds for every original MapKit
+  segment without losing alignment during operational-route cleanup.
+- Added route sections, camera and road-event data, traffic lights, speed
+  bumps, pedestrian crossings, lane guidance, HD/standing sections and route
+  metadata to the browser API.
+- Added speed-limit coloring, road-object markers and a compact MapKit data
+  completeness card to the responsive web interface.
+- Made the Home Assistant add-on the canonical maintained simulator; the old
+  standalone local server is archived in the main telemetry repository.
+
 ## 1.0.10
 
 - **Graphical Layer Icons on Mobile**: Replaced text inside topbar layer-switch buttons with crisp graphical icons (`•` Points, `╱` Line, `❖` Both) on smartphones to resolve text overflow.
