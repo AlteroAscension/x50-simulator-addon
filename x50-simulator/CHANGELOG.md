@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0
+
+- Added a persistent trip journal under the Home Assistant add-on `/data`
+  directory. One-second telemetry snapshots are retained across add-on
+  updates and restarts.
+- Added explicit `gps_progress_correction` and `gps_reacquired` events with
+  vehicle/corrected speed, odometer deltas, route progress, GPS quality,
+  correction weight and signed progress shift.
+- GPS outage events compare odometer distance, speed-integrated distance and
+  route progress before/after reacquisition, making calibration drift visible.
+- Added a responsive trip drawer with trip summaries, speed/GPS timeline and
+  a correction-event table. A manual finish action is available for bench
+  tests; otherwise a trip closes after three stationary minutes.
+- Added read-only trip APIs: `GET /api/controller/trips` and
+  `GET /api/controller/trips/<id>`.
+
 ## 1.1.3
 
 - Added explicit map-click modes: send a GPS point or inspect the nearest

@@ -28,6 +28,7 @@
       </div>
       <button class="icon-button stale-toggle" id="stalePointsToggle" title="Показать устаревшие или не относящиеся к маршруту history-точки" aria-label="Показать устаревшие точки" disabled>◷</button>
       <button class="icon-button" id="fitRoute" title="Показать маршрут">⌖</button>
+      <button class="icon-button trip-log-button" id="tripLogToggle" title="Журнал поездок" aria-label="Журнал поездок">≋</button>
       <button class="icon-button" id="fullscreenToggle" title="Полноэкранный режим" aria-label="Полноэкранный режим">⛶</button>
       <button class="icon-button" id="settingsToggle" title="Настройки">⚙</button>
     </div>
@@ -52,6 +53,31 @@
     <div class="segment-description" id="segmentDescription">Нажмите рядом с линией маршрута</div>
     <div class="segment-coordinates" id="segmentCoordinates">—</div>
     <details><summary>Все данные сегмента</summary><pre id="segmentJson">{}</pre></details>
+  </aside>
+
+  <aside class="trip-panel glass" id="tripPanel" aria-label="Журнал поездок">
+    <div class="trip-panel-heading">
+      <div><span class="eyebrow">Диагностика движения</span><h2>Журнал поездок</h2></div>
+      <div class="trip-panel-actions">
+        <button class="small-button" id="finishTrip" title="Завершить текущую поездку">Завершить</button>
+        <button class="icon-button" id="tripPanelClose" title="Закрыть">×</button>
+      </div>
+    </div>
+    <p class="trip-hint">Снимки пишутся раз в секунду. Отдельно фиксируются коррекции прогресса и возврат GPS после разрыва.</p>
+    <div class="trip-layout">
+      <div class="trip-list" id="tripList"><div class="trip-empty">Поездки появятся после начала движения</div></div>
+      <div class="trip-detail" id="tripDetail">
+        <div class="trip-summary" id="tripSummary"><span>Выберите поездку</span></div>
+        <canvas id="tripChart" height="170" aria-label="Скорость и GPS-коррекции"></canvas>
+        <div class="trip-chart-legend"><span><i class="speed"></i>скорость</span><span><i class="gps"></i>GPS доступен</span><span><i class="correction"></i>коррекция</span></div>
+        <div class="trip-events-wrap">
+          <table class="trip-events">
+            <thead><tr><th>Время</th><th>Событие</th><th>Без GPS</th><th>Скорость</th><th>Путь</th><th>Сдвиг</th></tr></thead>
+            <tbody id="tripEvents"><tr><td colspan="6">Нет выбранной поездки</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </aside>
 
   <section class="left-stack" id="leftStack">
@@ -165,6 +191,6 @@
 
   <div class="toast" id="toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=20260721-segment-inspector-v1"></script>
+  <script src="app.js?v=20260721-trip-journal-v1"></script>
 </body>
 </html>

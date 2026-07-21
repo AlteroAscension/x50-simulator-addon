@@ -24,6 +24,7 @@ const segmentHighlight = L.polyline([], {color:'#ffbd4a',weight:10,opacity:.96,l
 const segmentInspectMarker = L.circleMarker([0,0],{radius:6,weight:2,color:'#fff',fillColor:'#ffbd4a',fillOpacity:1,interactive:false});
 let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null,mapkitRevision=null,routeLayerMode='both',showStalePoints=false,stateBusy=false,routeBusy=false,toastTimer,lastShownError=null;
 let mapClickMode='gps',currentRoutePoints=[],currentMapkitData={},inspectedSegmentIndex=null,hasAutoFittedRoute=false,userAdjustedMap=false;
+let tripsBusy=false,selectedTripId=null,lastTripSignature='';
 
 function toast(message, error=false){const el=$('toast');el.textContent=message;el.style.borderColor=error?'rgba(255,98,119,.45)':'';el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2400)}
 async function request(path, options={}){const response=await fetch(`${API_BASE}${path}`,{credentials:'include',headers:{'Content-Type':'application/json','X-X50-Client':'navigation-lab'},...options});const text=await response.text();let data;try{data=JSON.parse(text)}catch(err){if(!response.ok)throw new Error(`HTTP ${response.status}: ${text.slice(0,60)}`);throw new Error(`Ошибка ответа (${response.status}): ${text.slice(0,60)}`)}if(!response.ok)throw new Error(data.detail||data.error||`HTTP ${response.status}`);return data}
@@ -163,6 +164,35 @@ function updateState(next){state=next;
 }
 
 async function pollState(){if(stateBusy)return;stateBusy=true;try{updateState(await request('/api/controller/state'))}catch(error){$('gatewayChip').classList.remove('online');$('gatewayChip').classList.add('warn')}finally{stateBusy=false}}
+
+function tripDate(ms){return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(ms))}
+function tripDuration(seconds){const value=Math.max(0,Math.round(Number(seconds)||0)),hours=Math.floor(value/3600),minutes=Math.floor(value%3600/60),secs=value%60;return hours?`${hours} ч ${minutes} мин`:`${minutes} мин ${secs} с`}
+function metric(value,digits=1,suffix=''){const number=Number(value);return Number.isFinite(number)?`${number.toFixed(digits)}${suffix}`:'—'}
+function renderTripList(payload){
+  const trips=payload.trips||[];$('finishTrip').disabled=!payload.active_trip_id;
+  if(!trips.length){$('tripList').innerHTML='<div class="trip-empty">Поездки появятся после начала движения</div>';return}
+  $('tripList').innerHTML=trips.map(trip=>`<button class="trip-list-item ${trip.id===selectedTripId?'active':''}" data-trip-id="${trip.id}"><span><b>${tripDate(trip.started_ms)}</b>${trip.active?'<em>идёт сейчас</em>':''}</span><small>${tripDuration(trip.duration_s)} · ${metric(trip.distance_odometer_m/1000,2,' км')}</small><small>GPS: ${trip.gps_outages||0} · коррекций: ${trip.correction_events||0} · Σ ${metric(trip.correction_total_m,1,' м')}</small></button>`).join('');
+  document.querySelectorAll('.trip-list-item').forEach(button=>button.addEventListener('click',()=>loadTrip(button.dataset.tripId)));
+  if(!selectedTripId&&trips[0])loadTrip(trips[0].id);
+}
+function drawTripChart(samples,events){
+  const canvas=$('tripChart'),box=canvas.getBoundingClientRect(),ratio=window.devicePixelRatio||1,width=Math.max(320,Math.round(box.width)),height=170;canvas.width=width*ratio;canvas.height=height*ratio;const ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);ctx.clearRect(0,0,width,height);ctx.fillStyle='rgba(4,12,21,.58)';ctx.fillRect(0,0,width,height);
+  if(!samples.length){ctx.fillStyle='#94a6b9';ctx.font='12px system-ui';ctx.fillText('Недостаточно данных',14,25);return}
+  const start=samples[0].time_ms,end=Math.max(start+1,samples[samples.length-1].time_ms),speeds=samples.map(s=>Number(s.vehicle_speed_kmh??s.simulator?.vehicle_speed_kmh??0)),maxSpeed=Math.max(20,...speeds)*1.12,x=ms=>(ms-start)/(end-start)*(width-28)+14,y=value=>height-18-Math.max(0,value)/maxSpeed*(height-34);
+  ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;for(let i=0;i<4;i++){const yy=14+i*(height-32)/3;ctx.beginPath();ctx.moveTo(14,yy);ctx.lineTo(width-14,yy);ctx.stroke()}
+  ctx.lineWidth=3;ctx.strokeStyle='#3bd6ff';ctx.beginPath();samples.forEach((s,index)=>{const px=x(s.time_ms),py=y(speeds[index]);index?ctx.lineTo(px,py):ctx.moveTo(px,py)});ctx.stroke();
+  ctx.strokeStyle='rgba(255,98,119,.72)';ctx.lineWidth=2;let outageStart=null;samples.forEach(s=>{if(!s.gps_good&&outageStart==null)outageStart=s.time_ms;if(s.gps_good&&outageStart!=null){ctx.fillStyle='rgba(255,98,119,.14)';ctx.fillRect(x(outageStart),14,Math.max(2,x(s.time_ms)-x(outageStart)),height-32);outageStart=null}});if(outageStart!=null){ctx.fillStyle='rgba(255,98,119,.14)';ctx.fillRect(x(outageStart),14,width-14-x(outageStart),height-32)}
+  events.forEach(event=>{const px=x(event.time_ms),correction=Number(event.correction_m??event.gps_catch_up_m);ctx.strokeStyle=correction>=0?'#ffbd4a':'#ff6277';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(px,14);ctx.lineTo(px,height-18);ctx.stroke();ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.arc(px,18,4,0,Math.PI*2);ctx.fill()});
+  ctx.fillStyle='#94a6b9';ctx.font='10px system-ui';ctx.fillText(`0`,14,height-5);ctx.fillText(`${Math.round(maxSpeed)} км/ч`,14,11);
+}
+function renderTripDetail(data){
+  const trip=data.summary||{},events=data.events||[],samples=data.samples||[];
+  $('tripSummary').innerHTML=`<span><small>Длительность</small><b>${tripDuration(trip.duration_s)}</b></span><span><small>Одометр</small><b>${metric(trip.distance_odometer_m,1,' м')}</b></span><span><small>Интеграл скорости</small><b>${metric(trip.distance_integrated_m,1,' м')}</b></span><span><small>Коррекции Σ</small><b>${metric(trip.correction_total_m,1,' м')}</b></span><span><small>Макс. вперёд</small><b>${metric(trip.max_forward_correction_m,1,' м')}</b></span><span><small>Разрывы GPS</small><b>${trip.gps_outages||0}</b></span>`;
+  $('tripEvents').innerHTML=events.length?events.slice().reverse().map(event=>{const reacquired=event.event==='gps_reacquired',distance=reacquired?(event.distance_by_odometer_m??event.distance_by_speed_integral_m):event.odometer_delta_m,shift=reacquired?event.gps_catch_up_m:event.correction_m;return `<tr><td>${new Date(event.time_ms).toLocaleTimeString('ru-RU')}</td><td><b>${reacquired?'GPS вернулся':'Коррекция'}</b><small>${event.progress_source||''}</small></td><td>${reacquired?metric(event.outage_duration_s,1,' с'):'—'}</td><td>${metric(event.vehicle_speed_kmh,1,' км/ч')}</td><td>${metric(distance,1,' м')}</td><td class="${Number(shift)>=0?'forward':'backward'}">${Number(shift)>=0?'+':''}${metric(shift,1,' м')}</td></tr>`}).join(''):'<tr><td colspan="6">Коррекций и разрывов GPS пока нет</td></tr>';
+  requestAnimationFrame(()=>drawTripChart(samples,events));
+}
+async function loadTrip(id){selectedTripId=id;try{const data=await request(`/api/controller/trips/${encodeURIComponent(id)}`);renderTripDetail(data);document.querySelectorAll('.trip-list-item').forEach(button=>button.classList.toggle('active',button.dataset.tripId===id))}catch(error){toast(error.message,true)}}
+async function pollTrips(force=false){if(tripsBusy||(!$('tripPanel').classList.contains('open')&&!force))return;tripsBusy=true;try{const payload=await request('/api/controller/trips'),signature=JSON.stringify((payload.trips||[]).map(t=>[t.id,t.ended_ms,t.samples,t.correction_events,t.gps_outages]));if(force||signature!==lastTripSignature){lastTripSignature=signature;renderTripList(payload);if(selectedTripId)await loadTrip(selectedTripId)}}catch(error){if(force)toast(error.message,true)}finally{tripsBusy=false}}
 async function pollRoute(){
   if(routeBusy)return;
   routeBusy=true;
@@ -243,6 +273,9 @@ $('reloadGuidance').addEventListener('click',()=>refreshRouteSources('guidance')
 $('reloadHistory').addEventListener('click',()=>refreshRouteSources('history'));
 $('reloadRoute').addEventListener('click',()=>refreshRouteSources('all'));
 $('fitRoute').addEventListener('click',()=>{if(exactRouteLine.getLatLngs().length>1)map.fitBounds(exactRouteLine.getBounds(),{padding:[80,80]});else if(routeLine.getLatLngs().length>1)map.fitBounds(routeLine.getBounds(),{padding:[80,80]});else if(state?.last_sent)map.setView([state.last_sent.lat,state.last_sent.lon],15)});
+$('tripLogToggle').addEventListener('click',()=>{$('tripPanel').classList.add('open');pollTrips(true)});
+$('tripPanelClose').addEventListener('click',()=>$('tripPanel').classList.remove('open'));
+$('finishTrip').addEventListener('click',async()=>{try{await request('/api/controller/trips/finish',{method:'POST',body:'{}'});selectedTripId=null;await pollTrips(true);toast('Поездка завершена')}catch(error){toast(error.message,true)}});
 $('settingsToggle').addEventListener('click',()=>$('settingsPanel').classList.toggle('open'));
 $('settingsClose').addEventListener('click',()=>$('settingsPanel').classList.remove('open'));
 document.querySelectorAll('#routeLayers button').forEach(button=>button.addEventListener('click',()=>setRouteLayer(button.dataset.layer)));
@@ -261,4 +294,4 @@ function fullscreenChanged(){const active=!!(document.fullscreenElement||documen
 $('fullscreenToggle').addEventListener('click',toggleFullscreen);document.addEventListener('fullscreenchange',fullscreenChanged);document.addEventListener('webkitfullscreenchange',fullscreenChanged);window.addEventListener('resize',()=>setTimeout(()=>map.invalidateSize(),80));
 
 const preferences=saved();for(const [id,key] of [['vehicleScale','vehicleScale'],['odoScale','odoScale'],['gpsScale','gpsScale'],['gpsHz','gpsHz'],['token','token']])if(preferences[key]!=null)$(id).value=preferences[key];
-setStalePoints(!!preferences.showStalePoints);setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);
+setStalePoints(!!preferences.showStalePoints);setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);setInterval(()=>pollTrips(false),5000);

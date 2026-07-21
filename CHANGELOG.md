@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0
+
+- Persistent trip journal with one-second diagnostic samples.
+- Explicit GPS outage/reacquisition and signed progress-correction events.
+- Responsive trip timeline, summaries and correction table in HA Ingress.
+- HA-mode ingestion through `sensor.x50_trip_diagnostics`.
+
 ## 1.1.3
 
 - Added separate GPS-selection and MapKit-segment inspection click modes.

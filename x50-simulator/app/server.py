@@ -17,6 +17,7 @@ import socket
 import subprocess
 import threading
 import time
+import uuid
 
 
 ROOT = Path(__file__).parent
@@ -80,6 +81,286 @@ def bearing_deg(a, b):
     y = math.sin(lon2 - lon1) * math.cos(lat2)
     x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(lon2 - lon1)
     return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+def finite_number(value, default=None):
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else default
+    except (TypeError, ValueError):
+        return default
+
+
+class TripLogStore:
+    """Persistent 1 Hz trip journal with explicit GPS correction events."""
+
+    SAMPLE_INTERVAL_S = 1.0
+    STOP_TIMEOUT_S = 180.0
+
+    def __init__(self, root=None):
+        requested = Path(root or os.environ.get("X50_TRIP_DIR", "/data/x50-trips"))
+        try:
+            requested.mkdir(parents=True, exist_ok=True)
+            self.root = requested
+        except OSError:
+            self.root = ROOT / ".x50-trips"
+            self.root.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.RLock()
+        self.active = None
+        self.last_sample_monotonic = 0.0
+        self.last_observe_monotonic = None
+        self.last_moving_monotonic = None
+        self.last_correction_count = None
+        self.last_gps_good = None
+        self.outage = None
+
+    @staticmethod
+    def _gps_age(data):
+        return finite_number(data.get("real_gps_age_ms"), finite_number(data.get("carlinkit_fix_age_ms")))
+
+    @classmethod
+    def _gps_good(cls, data):
+        age = cls._gps_age(data)
+        return age is not None and age <= 3000 and data.get("carlinkit_lat") is not None
+
+    def _paths(self, trip_id):
+        return self.root / (trip_id + ".jsonl"), self.root / (trip_id + ".summary.json")
+
+    @staticmethod
+    def _atomic_json(path, payload):
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        temporary.replace(path)
+
+    def _append(self, trip_id, record):
+        log_path, _ = self._paths(trip_id)
+        with log_path.open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+    def _start(self, now_ms, data, context):
+        trip_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now_ms / 1000)) + "-" + uuid.uuid4().hex[:6]
+        odometer = finite_number(data.get("odometer_km"), finite_number(context.get("odometer_km")))
+        progress = finite_number(data.get("progress_m"), finite_number(context.get("route_progress_m")))
+        self.active = {
+            "id": trip_id, "active": True, "started_ms": now_ms, "ended_ms": None,
+            "duration_s": 0.0, "start_odometer_km": odometer, "end_odometer_km": odometer,
+            "distance_odometer_m": 0.0, "distance_integrated_m": 0.0,
+            "start_progress_m": progress, "end_progress_m": progress,
+            "route_id": data.get("exact_route_id") or context.get("exact_route_id") or "",
+            "route_source": data.get("route_source") or context.get("route_source") or "none",
+            "samples": 0, "correction_events": 0, "gps_outages": 0,
+            "correction_total_m": 0.0, "correction_abs_total_m": 0.0,
+            "max_forward_correction_m": 0.0, "max_backward_correction_m": 0.0,
+            "max_speed_kmh": 0.0, "finish_reason": None,
+        }
+        self.last_correction_count = int(finite_number(data.get("correction_count"), 0) or 0)
+        self.last_gps_good = self._gps_good(data)
+        self.outage = None
+        if not self.last_gps_good:
+            self._begin_outage(now_ms, data, context)
+        self._append(trip_id, {"kind": "trip_start", "time_ms": now_ms,
+                               "route_id": self.active["route_id"], "route_source": self.active["route_source"]})
+        self._save_summary()
+
+    def _save_summary(self):
+        if self.active:
+            _, summary_path = self._paths(self.active["id"])
+            self._atomic_json(summary_path, self.active)
+
+    def _begin_outage(self, now_ms, data, context):
+        self.outage = {
+            "started_ms": now_ms,
+            "odometer_km": finite_number(data.get("odometer_km"), finite_number(context.get("odometer_km"))),
+            "progress_m": finite_number(data.get("progress_m"), finite_number(context.get("route_progress_m"))),
+            "route_match_progress_m": finite_number(data.get("route_match_progress_m")),
+            "integrated_m": 0.0,
+        }
+
+    def _event_base(self, now_ms, data, context):
+        fields = (
+            "vehicle_speed_kmh", "corrected_speed_kmh", "carlinkit_speed_kmh", "odometer_km",
+            "odometer_delta_m", "corrected_delta_m", "distance_factor", "speed_factor",
+            "progress_m", "route_match_progress_m", "route_match_distance_m", "gps_gap_m",
+            "real_gps_age_ms", "carlinkit_fix_age_ms", "carlinkit_accuracy_m",
+            "last_progress_correction_m", "last_correction_weight", "correction_count",
+            "rejected_corrections", "progress_source", "carlinkit_lat", "carlinkit_lon",
+            "fake_lat", "fake_lon")
+        event = {"kind": "event", "time_ms": now_ms}
+        for name in fields:
+            if name in data:
+                event[name] = data.get(name)
+        event.update({
+            "simulator_running": bool(context.get("running")),
+            "target_speed_kmh": context.get("target_speed_kmh"),
+            "simulator_odometer_km": context.get("odometer_km"),
+            "measured_gps_speed_kmh": context.get("measured_gps_speed_kmh"),
+            "gateway_output_progress_m": context.get("gateway_output_progress_m"),
+            "gateway_output_gap_m": context.get("gateway_output_gap_m"),
+        })
+        return event
+
+    def _record_correction(self, now_ms, data, context, previous_count, current_count):
+        correction = finite_number(data.get("last_progress_correction_m"), 0.0) or 0.0
+        event = self._event_base(now_ms, data, context)
+        event.update({"event": "gps_progress_correction", "correction_m": correction,
+                      "corrections_since_sample": max(1, current_count - previous_count)})
+        self._append(self.active["id"], event)
+        self.active["correction_events"] += 1
+        self.active["correction_total_m"] += correction
+        self.active["correction_abs_total_m"] += abs(correction)
+        self.active["max_forward_correction_m"] = max(self.active["max_forward_correction_m"], correction)
+        self.active["max_backward_correction_m"] = min(self.active["max_backward_correction_m"], correction)
+
+    def _finish_outage(self, now_ms, data, context):
+        if not self.outage:
+            return
+        event = self._event_base(now_ms, data, context)
+        current_odo = finite_number(data.get("odometer_km"), finite_number(context.get("odometer_km")))
+        current_progress = finite_number(data.get("progress_m"), finite_number(context.get("route_progress_m")))
+        match_progress = finite_number(data.get("route_match_progress_m"))
+        start_odo = self.outage.get("odometer_km")
+        start_progress = self.outage.get("progress_m")
+        correction = finite_number(data.get("last_progress_correction_m"))
+        if correction is None and match_progress is not None and current_progress is not None:
+            correction = match_progress - current_progress
+        event.update({
+            "event": "gps_reacquired", "outage_started_ms": self.outage["started_ms"],
+            "outage_duration_s": round((now_ms - self.outage["started_ms"]) / 1000.0, 3),
+            "odometer_before_outage_km": start_odo,
+            "odometer_at_reacquisition_km": current_odo,
+            "distance_by_odometer_m": (None if current_odo is None or start_odo is None
+                                        else round((current_odo - start_odo) * 1000.0, 3)),
+            "distance_by_speed_integral_m": round(self.outage["integrated_m"], 3),
+            "progress_before_outage_m": start_progress,
+            "progress_at_reacquisition_m": current_progress,
+            "progress_during_outage_m": (None if current_progress is None or start_progress is None
+                                          else round(current_progress - start_progress, 3)),
+            "gps_catch_up_m": None if correction is None else round(correction, 3),
+        })
+        self._append(self.active["id"], event)
+        self.active["gps_outages"] += 1
+        self.outage = None
+
+    def _sample(self, now_ms, data, context):
+        keys = (
+            "enabled", "mode", "reason", "vehicle_speed_kmh", "corrected_speed_kmh", "speed_factor",
+            "odometer_km", "odometer_delta_m", "corrected_delta_m", "distance_factor",
+            "distance_calibration_count", "progress_source", "route_length_m", "progress_m",
+            "route_match_progress_m", "route_match_distance_m", "last_progress_correction_m",
+            "last_correction_weight", "real_gps_age_ms", "carlinkit_fix_age_ms", "carlinkit_lat",
+            "carlinkit_lon", "carlinkit_accuracy_m", "carlinkit_speed_kmh", "carlinkit_bearing",
+            "gps_gap_m", "correction_count", "rejected_corrections", "injected_count",
+            "fake_lat", "fake_lon", "exact_route_id", "route_source")
+        sample = {"kind": "sample", "time_ms": now_ms, "gps_good": self._gps_good(data)}
+        for name in keys:
+            if name in data:
+                sample[name] = data.get(name)
+        sample["simulator"] = {name: context.get(name) for name in (
+            "running", "target_speed_kmh", "gps_speed_kmh", "vehicle_speed_kmh",
+            "measured_gps_speed_kmh", "odometer_km", "route_progress_m",
+            "gateway_output_progress_m", "gateway_output_gap_m")}
+        self._append(self.active["id"], sample)
+        self.active["samples"] += 1
+
+    def observe(self, data, context):
+        if not isinstance(data, dict) or not data.get("ok", True):
+            return
+        now_mono = time.monotonic()
+        now_ms = int(time.time() * 1000)
+        speed = finite_number(data.get("vehicle_speed_kmh"),
+                              finite_number(context.get("vehicle_speed_kmh"), 0.0)) or 0.0
+        moving = speed >= 1.0 or (bool(context.get("running")) and
+                                  (finite_number(context.get("target_speed_kmh"), 0.0) or 0.0) >= 1.0)
+        with self.lock:
+            if self.active is None:
+                if not moving:
+                    self.last_observe_monotonic = now_mono
+                    self.last_gps_good = self._gps_good(data)
+                    return
+                self._start(now_ms, data, context)
+            dt = 0.0 if self.last_observe_monotonic is None else max(0.0, min(5.0, now_mono - self.last_observe_monotonic))
+            self.last_observe_monotonic = now_mono
+            if moving:
+                self.last_moving_monotonic = now_mono
+            elif self.last_moving_monotonic is not None and now_mono - self.last_moving_monotonic >= self.STOP_TIMEOUT_S:
+                self.finish("stationary_timeout")
+                return
+            integrated = speed / 3.6 * dt
+            self.active["distance_integrated_m"] += integrated
+            if self.outage is not None:
+                self.outage["integrated_m"] += integrated
+            gps_good = self._gps_good(data)
+            if self.last_gps_good is True and not gps_good:
+                self._begin_outage(now_ms, data, context)
+            elif self.last_gps_good is False and gps_good:
+                self._finish_outage(now_ms, data, context)
+            self.last_gps_good = gps_good
+            correction_count = int(finite_number(data.get("correction_count"), self.last_correction_count or 0) or 0)
+            if self.last_correction_count is not None and correction_count > self.last_correction_count:
+                self._record_correction(now_ms, data, context, self.last_correction_count, correction_count)
+            self.last_correction_count = correction_count
+            odometer = finite_number(data.get("odometer_km"), finite_number(context.get("odometer_km")))
+            progress = finite_number(data.get("progress_m"), finite_number(context.get("route_progress_m")))
+            self.active["ended_ms"] = now_ms
+            self.active["duration_s"] = round((now_ms - self.active["started_ms"]) / 1000.0, 1)
+            self.active["end_odometer_km"] = odometer
+            self.active["end_progress_m"] = progress
+            if odometer is not None and self.active["start_odometer_km"] is not None:
+                self.active["distance_odometer_m"] = round((odometer - self.active["start_odometer_km"]) * 1000.0, 3)
+            self.active["distance_integrated_m"] = round(self.active["distance_integrated_m"], 3)
+            self.active["max_speed_kmh"] = max(self.active["max_speed_kmh"], speed)
+            if now_mono - self.last_sample_monotonic >= self.SAMPLE_INTERVAL_S:
+                self.last_sample_monotonic = now_mono
+                self._sample(now_ms, data, context)
+                self._save_summary()
+
+    def finish(self, reason="manual"):
+        with self.lock:
+            if not self.active:
+                return {"ok": True, "trip": None}
+            now_ms = int(time.time() * 1000)
+            self.active.update({"active": False, "ended_ms": now_ms,
+                                "duration_s": round((now_ms - self.active["started_ms"]) / 1000.0, 1),
+                                "finish_reason": reason})
+            self._append(self.active["id"], {"kind": "trip_end", "time_ms": now_ms, "reason": reason})
+            self._save_summary()
+            finished = dict(self.active)
+            self.active = None
+            self.outage = None
+            self.last_moving_monotonic = None
+            return {"ok": True, "trip": finished}
+
+    def list(self):
+        with self.lock:
+            trips = []
+            for path in self.root.glob("*.summary.json"):
+                try:
+                    trips.append(json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, ValueError):
+                    continue
+            trips.sort(key=lambda item: item.get("started_ms", 0), reverse=True)
+            return {"ok": True, "active_trip_id": self.active.get("id") if self.active else None,
+                    "storage_path": str(self.root), "trips": trips}
+
+    def detail(self, trip_id):
+        if not trip_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for char in trip_id):
+            return {"ok": False, "error": "invalid_trip_id"}, 400
+        log_path, summary_path = self._paths(trip_id)
+        if not summary_path.exists():
+            return {"ok": False, "error": "trip_not_found"}, 404
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        samples, events = [], []
+        if log_path.exists():
+            for line in log_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if record.get("kind") == "sample":
+                    samples.append(record)
+                elif record.get("kind") == "event":
+                    events.append(record)
+        return {"ok": True, "summary": summary, "samples": samples, "events": events}, 200
 
 
 class LiveRouteHook:
@@ -351,6 +632,7 @@ class SimulationEngine:
         self.ha_token = os.environ.get("SUPERVISOR_TOKEN", "")
         self.force_route_anchor_pending = False
         self.route_hook = LiveRouteHook(adb, device, os.environ.get("X50_ROUTE_AGENT"))
+        self.trip_store = TripLogStore()
         self._last_integrate = time.monotonic()
         self._next_send = self._last_integrate
         self._next_route_poll = 0.0
@@ -364,6 +646,7 @@ class SimulationEngine:
         self.closed = True
         self.geo_console.close()
         self.route_hook.close()
+        self.trip_store.finish("addon_shutdown")
         self.wake.set()
 
     def update(self, data):
@@ -505,6 +788,22 @@ class SimulationEngine:
     def trace_state(self):
         with self.lock:
             return {"ok": True, "samples": list(self.trace)}
+
+    def _trip_context(self):
+        with self.lock:
+            return {
+                "running": self.running,
+                "target_speed_kmh": round(self.target_speed_kmh, 3),
+                "gps_speed_kmh": round(self.target_speed_kmh * self.gps_speed_scale if self.running else 0.0, 3),
+                "vehicle_speed_kmh": round(self.target_speed_kmh * self.vehicle_speed_scale if self.running else 0.0, 3),
+                "measured_gps_speed_kmh": round(self.last_measured_speed_kmh, 3),
+                "odometer_km": round(self.odometer_km, 6),
+                "route_progress_m": round(self.route_progress_m, 3),
+                "gateway_output_progress_m": self.gateway_output_progress,
+                "gateway_output_gap_m": self.gateway_output_gap_m,
+                "route_source": self.route_source,
+                "exact_route_id": self.exact_route_id,
+            }
 
     def set_gateway_fake(self, enabled):
         with self.lock:
@@ -698,11 +997,29 @@ class SimulationEngine:
         with self.lock:
             token = self.token
             base_url = self.gateway_url
-        result, status = gateway_request("/api/fake_nav", token=token, base_url=base_url)
+            mode = self.gateway_mode
+            ha_url = self.ha_url
+            ha_token = self.ha_token
+        if mode == "ha":
+            ha_state, status = ha_request("states/sensor.x50_trip_diagnostics", "GET",
+                                          ha_url=ha_url, ha_token=ha_token)
+            attributes = ha_state.get("attributes", {}) if isinstance(ha_state, dict) else {}
+            result = dict(attributes.get("fake_nav") or {})
+            if status < 300:
+                result["ok"] = True
+                if attributes.get("vehicle_speed_kmh") is not None:
+                    result["vehicle_speed_kmh"] = attributes.get("vehicle_speed_kmh")
+                if attributes.get("odometer_km") is not None:
+                    result["odometer_km"] = attributes.get("odometer_km")
+                result["ha_sample_timestamp_ms"] = attributes.get("sample_timestamp_ms")
+        else:
+            result, status = gateway_request("/api/fake_nav", token=token, base_url=base_url)
         with self.lock:
             self.gateway_online = status < 500
             if status < 300:
                 self.fake_nav = result
+        if status < 300:
+            self.trip_store.observe(result, self._trip_context())
 
     def _prepare_route(self):
         self.route_distances = [0.0]
@@ -967,6 +1284,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.reply_json(self.engine.route_state())
         elif path == "/api/controller/trace":
             self.reply_json(self.engine.trace_state())
+        elif path == "/api/controller/trips":
+            self.reply_json(self.engine.trip_store.list())
+        elif path.startswith("/api/controller/trips/"):
+            trip_id = path.rsplit("/", 1)[-1]
+            payload, status = self.engine.trip_store.detail(trip_id)
+            self.reply_json(payload, status)
         elif path.startswith("/api/"):
             self.proxy()
         else:
@@ -987,6 +1310,8 @@ class Handler(SimpleHTTPRequestHandler):
             data = self.read_json()
             payload, status = self.engine.reload_route(str(data.get("source", "all")))
             self.reply_json(payload, status)
+        elif path == "/api/controller/trips/finish":
+            self.reply_json(self.engine.trip_store.finish("manual"))
         elif path == "/api/location":
             data = self.read_json()
             data["emulator_native"] = True

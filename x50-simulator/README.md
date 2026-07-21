@@ -38,3 +38,31 @@ to the loopback-only ADB server instead of making ADB listen on the whole LAN.
 The main `X50_telemetry` repository also provides
 `start-x50-ha-avd-bridge.cmd`. On Windows it creates restricted TCP proxies
 for the local ADB server and Gateway without exposing ADB to the whole LAN.
+
+## Журнал поездок и GPS-коррекций
+
+Аддон начинает поездку, когда скорость автомобиля или стенда достигает
+`1 км/ч`, и автоматически завершает её через три минуты стоянки. Для коротких
+стендовых экспериментов в панели **Журнал поездок** есть кнопка ручного
+завершения. Данные хранятся в `/data/x50-trips`, то есть переживают обновление
+контейнера аддона. Автоматического удаления сейчас нет.
+
+Раз в секунду сохраняются скорости автомобиля/GPS, одометр и его приращение,
+прогресс маршрута, проекция реального GPS, возраст/точность GPS, коэффициенты
+коррекции и счётчики Gateway. Дополнительно создаются события:
+
+- `gps_progress_correction` — Gateway применил коррекцию прогресса;
+- `gps_reacquired` — после разрыва снова появился хороший GPS fix.
+
+Для `gps_reacquired` записываются длительность разрыва, путь по одометру, путь
+по интегралу скорости, изменение прогресса и итоговый GPS-сдвиг. По этим
+значениям можно понять, врёт ли масштаб одометра или ошибка возникает при
+интегрировании скорости.
+
+API для последующего анализа:
+
+```text
+GET  /api/controller/trips
+GET  /api/controller/trips/<trip-id>
+POST /api/controller/trips/finish
+```
