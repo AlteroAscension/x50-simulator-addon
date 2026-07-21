@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2
+
+- Fixed manual AVD positioning from HA: native emulator-console commands are
+  now executed by a restricted Windows host agent instead of inside HA.
+- Added `geo_bridge_url` and `geo_bridge_token` settings with automatic URL
+  derivation from `adb_host` for existing installations.
+
 ## 1.1.1
 
 - Fixed AVD control from Home Assistant by using the ADB server on the

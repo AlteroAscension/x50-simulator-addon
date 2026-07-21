@@ -229,6 +229,27 @@ class EmulatorGeoConsole:
             self._read_response()
 
     def fix(self, longitude: float, latitude: float):
+        if self.transport == "http":
+            bridge_url = os.environ.get("X50_GEO_BRIDGE_URL", "").rstrip("/")
+            if not bridge_url:
+                raise OSError("X50_GEO_BRIDGE_URL is not configured")
+            body = json.dumps({"latitude": latitude, "longitude": longitude}).encode("utf-8")
+            request = Request(
+                bridge_url + "/geo", data=body, method="POST",
+                headers={"Content-Type": "application/json",
+                         "X-X50-Token": os.environ.get("X50_GEO_BRIDGE_TOKEN", "x50test")})
+            sent_at = time.monotonic()
+            try:
+                with urlopen(request, timeout=3) as response:
+                    result = json.loads(response.read() or b"{}")
+            except HTTPError as error:
+                detail = error.read().decode("utf-8", errors="replace")
+                raise OSError("GPS bridge HTTP {}: {}".format(error.code, detail))
+            except Exception as error:
+                raise OSError("GPS bridge unavailable: {}".format(error))
+            if not result.get("ok"):
+                raise OSError(result.get("detail") or result.get("error") or "GPS bridge rejected fix")
+            return sent_at
         if self.transport == "adb":
             sent_at = time.monotonic()
             result = subprocess.run(

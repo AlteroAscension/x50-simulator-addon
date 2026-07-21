@@ -10,6 +10,8 @@ if [ -f "$CONFIG_PATH" ]; then
     ADB_DEVICE=$(jq --raw-output '.adb_device // "emulator-5554"' $CONFIG_PATH)
     GATEWAY_URL=$(jq --raw-output '.gateway_url // "http://192.168.66.124:8080"' $CONFIG_PATH)
     GATEWAY_TOKEN=$(jq --raw-output '.gateway_token // "x50test"' $CONFIG_PATH)
+    GEO_BRIDGE_URL=$(jq --raw-output '.geo_bridge_url // empty' $CONFIG_PATH)
+    GEO_BRIDGE_TOKEN=$(jq --raw-output '.geo_bridge_token // .gateway_token // "x50test"' $CONFIG_PATH)
 else
     ADB_ENABLED="true"
     ADB_HOST="192.168.66.124"
@@ -18,6 +20,8 @@ else
     ADB_DEVICE="emulator-5554"
     GATEWAY_URL="http://192.168.66.124:8080"
     GATEWAY_TOKEN="x50test"
+    GEO_BRIDGE_URL=""
+    GEO_BRIDGE_TOKEN="x50test"
 fi
 
 echo "[X50 Add-on] Starting X50 Navigation Simulator..."
@@ -31,7 +35,12 @@ if [ "$ADB_ENABLED" = "true" ] && [ -n "$ADB_HOST" ]; then
         # the emulator transport type, so `adb emu geo fix` remains available.
         export ADB_SERVER_SOCKET="tcp:${ADB_HOST}:${ADB_PORT}"
         export X50_DEVICE="$ADB_DEVICE"
-        export X50_GEO_TRANSPORT="adb"
+        if [ -z "$GEO_BRIDGE_URL" ]; then
+            GEO_BRIDGE_URL="http://${ADB_HOST}:18081"
+        fi
+        export X50_GEO_TRANSPORT="http"
+        export X50_GEO_BRIDGE_URL="$GEO_BRIDGE_URL"
+        export X50_GEO_BRIDGE_TOKEN="$GEO_BRIDGE_TOKEN"
         echo "[X50 Add-on] Using remote ADB server ${ADB_HOST}:${ADB_PORT}, device ${ADB_DEVICE}."
         (sleep 1 && adb devices) >/dev/null 2>&1 &
     else

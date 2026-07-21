@@ -26,6 +26,8 @@ adb_server_mode: true
 adb_device: "emulator-5554"
 gateway_url: "http://192.168.3.75:18080"
 gateway_token: "x50test"
+geo_bridge_url: "http://192.168.3.75:18081"
+geo_bridge_token: "x50test"
 ```
 
 For an AVD hosted on another computer, `adb_server_mode: true` connects the

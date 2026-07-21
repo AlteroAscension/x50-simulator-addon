@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.2
+
+- Fixed native AVD GPS positioning through the restricted Windows host agent.
+- Added automatic `geo_bridge_url` configuration for existing HA installs.
+
 ## 1.1.1
 
 - Fixed AVD control through a remote Windows ADB server.

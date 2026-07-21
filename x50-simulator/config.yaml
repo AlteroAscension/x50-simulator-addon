@@ -1,6 +1,6 @@
 name: "X50 Navigation Simulator"
 slug: "x50_simulator"
-version: "1.1.1"
+version: "1.1.2"
 description: "Асинхронный симулятор движения и подмены GPS координат для Belgee X50 / Geely Coolray"
 url: "https://github.com/AlteroAscension/x50-simulator-addon"
 changelog: "https://github.com/AlteroAscension/x50-simulator-addon/blob/main/x50-simulator/CHANGELOG.md"
@@ -27,6 +27,8 @@ options:
   adb_device: "emulator-5554"
   gateway_url: "http://192.168.66.124:8080"
   gateway_token: "x50test"
+  geo_bridge_url: ""
+  geo_bridge_token: "x50test"
 schema:
   adb_enabled: bool
   adb_host: str
@@ -35,3 +37,5 @@ schema:
   adb_device: str
   gateway_url: str
   gateway_token: str
+  geo_bridge_url: str
+  geo_bridge_token: password
