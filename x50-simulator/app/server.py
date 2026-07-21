@@ -625,7 +625,7 @@ class SimulationEngine:
         self.last_gateway_fake_active = False
         self.speed_window = deque()
         self.trace = deque(maxlen=600)
-        self.token = "x50test"
+        self.token = os.environ.get("X50_TOKEN", "x50test")
         self.gateway_url = GATEWAY
         self.gateway_mode = os.environ.get("X50_GATEWAY_MODE", "direct")
         self.ha_url = os.environ.get("HA_URL", "http://supervisor/core")
