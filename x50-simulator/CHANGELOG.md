@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.3
+
+- Added explicit map-click modes: send a GPS point or inspect the nearest
+  MapKit route segment without changing AVD position.
+- Added a segment data card with speed limit, traffic speed/type, section,
+  road objects, coordinates and complete segment JSON.
+- Route refreshes now replace only map overlays and preserve the current map
+  center and zoom. Automatic fitting happens only on the initial untouched
+  view; the existing fit button remains available on demand.
+
 ## 1.1.2
 
 - Fixed manual AVD positioning from HA: native emulator-console commands are

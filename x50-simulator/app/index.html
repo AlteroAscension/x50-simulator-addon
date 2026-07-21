@@ -33,6 +33,27 @@
     </div>
   </header>
 
+  <div class="map-action-switch glass" id="mapClickMode" aria-label="Действие при нажатии на карту">
+    <button data-click-mode="gps" class="active" title="Выбирать и передавать GPS-точку"><b>⌖</b><span>GPS-точка</span></button>
+    <button data-click-mode="inspect" title="Просматривать данные ближайшего сегмента"><b>ⓘ</b><span>Сегмент</span></button>
+  </div>
+
+  <aside class="segment-inspector glass" id="segmentInspector" aria-live="polite">
+    <div class="segment-inspector-heading">
+      <div><span class="eyebrow">Инспектор MapKit</span><h2 id="segmentTitle">Сегмент —</h2></div>
+      <button class="icon-button" id="segmentInspectorClose" title="Закрыть инспектор">×</button>
+    </div>
+    <div class="segment-primary-grid">
+      <span><small>Ограничение</small><strong id="segmentSpeedLimit">—</strong></span>
+      <span><small>Пробка / скорость</small><strong id="segmentJam">—</strong></span>
+      <span><small>Длина</small><strong id="segmentLength">—</strong></span>
+      <span><small>Секция</small><strong id="segmentSection">—</strong></span>
+    </div>
+    <div class="segment-description" id="segmentDescription">Нажмите рядом с линией маршрута</div>
+    <div class="segment-coordinates" id="segmentCoordinates">—</div>
+    <details><summary>Все данные сегмента</summary><pre id="segmentJson">{}</pre></details>
+  </aside>
+
   <section class="left-stack" id="leftStack">
     <article class="mode-card glass" id="modeCard">
       <div class="card-heading compact"><div><span class="eyebrow">Источник позиции</span><h2>GPS-сценарий</h2></div></div>
@@ -144,6 +165,6 @@
 
   <div class="toast" id="toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=20260721-mapkit-metadata-v2"></script>
+  <script src="app.js?v=20260721-segment-inspector-v1"></script>
 </body>
 </html>

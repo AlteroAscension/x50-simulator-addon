@@ -20,7 +20,10 @@ const historyPointLayer = L.layerGroup().addTo(map);
 const staleHistoryPointLayer = L.layerGroup();
 const speedLimitLayer = L.layerGroup().addTo(map);
 const roadEventLayer = L.layerGroup().addTo(map);
+const segmentHighlight = L.polyline([], {color:'#ffbd4a',weight:10,opacity:.96,lineCap:'round',className:'segment-highlight'}).addTo(map);
+const segmentInspectMarker = L.circleMarker([0,0],{radius:6,weight:2,color:'#fff',fillColor:'#ffbd4a',fillOpacity:1,interactive:false});
 let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null,mapkitRevision=null,routeLayerMode='both',showStalePoints=false,stateBusy=false,routeBusy=false,toastTimer,lastShownError=null;
+let mapClickMode='gps',currentRoutePoints=[],currentMapkitData={},inspectedSegmentIndex=null,hasAutoFittedRoute=false,userAdjustedMap=false;
 
 function toast(message, error=false){const el=$('toast');el.textContent=message;el.style.borderColor=error?'rgba(255,98,119,.45)':'';el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2400)}
 async function request(path, options={}){const response=await fetch(`${API_BASE}${path}`,{credentials:'include',headers:{'Content-Type':'application/json','X-X50-Client':'navigation-lab'},...options});const text=await response.text();let data;try{data=JSON.parse(text)}catch(err){if(!response.ok)throw new Error(`HTTP ${response.status}: ${text.slice(0,60)}`);throw new Error(`Ошибка ответа (${response.status}): ${text.slice(0,60)}`)}if(!response.ok)throw new Error(data.detail||data.error||`HTTP ${response.status}`);return data}
@@ -80,6 +83,52 @@ function updateMapkitRoute(points,data){
   void counts;
 }
 
+function setMapClickMode(mode,quiet=false){
+  mapClickMode=mode==='inspect'?'inspect':'gps';
+  document.body.classList.toggle('inspect-mode',mapClickMode==='inspect');
+  document.querySelectorAll('#mapClickMode button').forEach(button=>button.classList.toggle('active',button.dataset.clickMode===mapClickMode));
+  persist({mapClickMode});
+  if(!quiet)toast(mapClickMode==='inspect'?'Клик по карте: данные сегмента':'Клик по карте: передача GPS-точки');
+}
+
+function segmentPositionValue(position){return position?(Number(position.segment_index)||0)+Math.max(0,Math.min(1,Number(position.segment_position)||0)):null}
+function rangeContainsSegment(range,index){const begin=segmentPositionValue(range?.begin),end=segmentPositionValue(range?.end),middle=index+.5;return begin!=null&&end!=null&&middle>=begin&&middle<=end}
+function itemsAtSegment(items,index){return (items||[]).filter(item=>Math.floor(Number((item.position||item)?.segment_index))===index)}
+function closestRouteSegment(latlng){
+  if(currentRoutePoints.length<2)return null;
+  const click=map.latLngToContainerPoint(latlng);let best=null;
+  for(let index=0;index<currentRoutePoints.length-1;index++){
+    const a=currentRoutePoints[index],b=currentRoutePoints[index+1],pa=map.latLngToContainerPoint(a),pb=map.latLngToContainerPoint(b);
+    const dx=pb.x-pa.x,dy=pb.y-pa.y,length2=dx*dx+dy*dy;
+    const t=length2?Math.max(0,Math.min(1,((click.x-pa.x)*dx+(click.y-pa.y)*dy)/length2)):0;
+    const x=pa.x+dx*t,y=pa.y+dy*t,distance=Math.hypot(click.x-x,click.y-y);
+    if(!best||distance<best.distance)best={index,distance,t,point:[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]};
+  }
+  return best;
+}
+function inspectSegment(index,clickPoint=null){
+  if(index<0||index>=currentRoutePoints.length-1)return;
+  inspectedSegmentIndex=index;
+  const a=currentRoutePoints[index],b=currentRoutePoints[index+1],data=currentMapkitData||{};
+  const limit=Number(data.speed_limits_mps?.[index]),jam=data.jam_segments?.[index]||null;
+  const sectionIndex=(data.sections||[]).findIndex(section=>rangeContainsSegment(section.geometry,index));
+  const section=sectionIndex>=0?data.sections[sectionIndex]:null;
+  const events=itemsAtSegment(data.events,index),trafficLights=itemsAtSegment(data.traffic_lights,index),speedBumps=itemsAtSegment(data.speed_bumps,index),crossings=itemsAtSegment(data.pedestrian_crossings,index),laneSigns=itemsAtSegment(data.lane_signs,index);
+  const details={segment_index:index,start:{lat:a[0],lon:a[1]},end:{lat:b[0],lon:b[1]},length_m:Number(map.distance(a,b).toFixed(2)),speed_limit_mps:Number.isFinite(limit)?limit:null,speed_limit_kmh:Number.isFinite(limit)?Number((limit*3.6).toFixed(1)):null,jam,section_index:sectionIndex>=0?sectionIndex:null,section,events,traffic_lights:trafficLights,speed_bumps:speedBumps,pedestrian_crossings:crossings,lane_signs:laneSigns,hd_section:(data.hd_sections||[]).some(range=>rangeContainsSegment(range,index)),standing:(data.standing_segments||[]).some(range=>rangeContainsSegment(range,index))};
+  segmentHighlight.setLatLngs([a,b]);
+  if(!map.hasLayer(segmentHighlight))segmentHighlight.addTo(map);
+  segmentInspectMarker.setLatLng(clickPoint||[(a[0]+b[0])/2,(a[1]+b[1])/2]);if(!map.hasLayer(segmentInspectMarker))segmentInspectMarker.addTo(map);
+  $('segmentTitle').textContent=`Сегмент ${index}`;
+  $('segmentSpeedLimit').textContent=Number.isFinite(limit)?`${Math.round(limit*3.6)} км/ч`:'нет данных';
+  $('segmentJam').textContent=jam?`${jam.jam_type||'—'}${jam.speed_mps==null?'':` · ${Math.round(Number(jam.speed_mps)*3.6)} км/ч`}`:'нет данных';
+  $('segmentLength').textContent=`${details.length_m.toFixed(1)} м`;$('segmentSection').textContent=sectionIndex>=0?`№ ${sectionIndex}`:'—';
+  const annotation=section?.annotation||{},objects=[];if(events.length)objects.push(`событий: ${events.length}`);if(trafficLights.length)objects.push(`светофоров: ${trafficLights.length}`);if(speedBumps.length)objects.push(`неровностей: ${speedBumps.length}`);if(crossings.length)objects.push(`переходов: ${crossings.length}`);if(laneSigns.length)objects.push(`схем полос: ${laneSigns.length}`);if(details.hd_section)objects.push('HD-секция');if(details.standing)objects.push('остановка');
+  $('segmentDescription').textContent=[annotation.description,annotation.toponym,objects.join(' · ')].filter(Boolean).join(' · ')||'Дополнительных объектов на сегменте нет';
+  $('segmentCoordinates').textContent=`${a[0].toFixed(6)}, ${a[1].toFixed(6)} → ${b[0].toFixed(6)}, ${b[1].toFixed(6)}`;
+  $('segmentJson').textContent=JSON.stringify(details,null,2);$('segmentInspector').classList.add('open');
+}
+function closeSegmentInspector(){inspectedSegmentIndex=null;$('segmentInspector').classList.remove('open');segmentHighlight.setLatLngs([]);segmentInspectMarker.remove()}
+
 function calibrationPatch(){persist();return {vehicle_speed_scale:pct('vehicleScale'),odometer_scale:pct('odoScale'),gps_speed_scale:pct('gpsScale'),gps_hz:number('gpsHz'),token:$('token').value,gateway_url:$('gatewayUrl').value,ha_url:$('haUrl').value,ha_token:$('haToken').value,odometer_km:number('odometer')}}
 let controlTimer;
 function queueControl(patch){clearTimeout(controlTimer);controlTimer=setTimeout(()=>control({...calibrationPatch(),...patch}).catch(()=>{}),70)}
@@ -126,13 +175,15 @@ async function pollRoute(){
         routeGlow.setLatLngs([]);routeLine.setLatLngs([]);exactRouteLine.setLatLngs([]);
         exactPointLayer.clearLayers();guidancePointLayer.clearLayers();historyPointLayer.clearLayers();staleHistoryPointLayer.clearLayers();
         speedLimitLayer.clearLayers();roadEventLayer.clearLayers();mapkitRevision=null;
+        currentRoutePoints=[];currentMapkitData={};closeSegmentInspector();
         $('exactCount').textContent='0';$('guidanceCount').textContent='0';$('historyCount').textContent='0';$('staleHistoryCount').textContent='0';
       }
       return;
     }
     const exact=route.exact_points||[],mapkitData=route.mapkit_route||{};
+    currentRoutePoints=(exact.length>1?exact:route.points||[]).map(p=>[Number(p[0]),Number(p[1])]);currentMapkitData=mapkitData;
     const nextMapkitRevision=`${mapkitData.captured_at_ms||0}:${mapkitData.signature||''}:${mapkitData.speed_limits_mps?.length||0}:${mapkitData.events?.length||0}`;
-    if(nextMapkitRevision!==mapkitRevision){mapkitRevision=nextMapkitRevision;updateMapkitRoute(exact,mapkitData)}
+    if(nextMapkitRevision!==mapkitRevision){mapkitRevision=nextMapkitRevision;updateMapkitRoute(exact,mapkitData);if(inspectedSegmentIndex!=null&&inspectedSegmentIndex<currentRoutePoints.length-1)inspectSegment(inspectedSegmentIndex)}
     if(signature===routeRevision)return;
     routeRevision=signature;
     const latlngs=route.points.map(p=>[p[0],p[1]]),exactLatLngs=exact.map(p=>[p[0],p[1]]);
@@ -145,7 +196,8 @@ async function pollRoute(){
     $('exactCount').textContent=exact.length;$('guidanceCount').textContent=guidance.length;$('historyCount').textContent=history.length;$('staleHistoryCount').textContent=stale.length;
     document.querySelector('.stale-legend').classList.toggle('visible',!!stale.length);$('stalePointsToggle').disabled=!stale.length;$('stalePointsToggle').title=stale.length?`Устаревшие/вне маршрута history: ${stale.length}`:'Устаревших history-точек нет';
     setRouteLayer(routeLayerMode);$('routeProgress').max=Math.max(1,Math.round(route.length_m));
-    if(latlngs.length>1){map.fitBounds((exactLatLngs.length>1?exactRouteLine:routeLine).getBounds(),{padding:[90,90]});const pointInfo=`MapKit ${exact.length}, guidance ${guidance.length}, history ${history.length}${stale.length?`, старых ${stale.length}`:''}`;toast(`${route.route_source==='exact'?'Точный MapKit-маршрут':'Маршрут'} ${(route.length_m/1000).toFixed(1)} км · ${pointInfo}`)}
+    if(inspectedSegmentIndex!=null){if(inspectedSegmentIndex<currentRoutePoints.length-1)inspectSegment(inspectedSegmentIndex);else closeSegmentInspector()}
+    if(latlngs.length>1){if(!hasAutoFittedRoute){if(!userAdjustedMap)map.fitBounds((exactLatLngs.length>1?exactRouteLine:routeLine).getBounds(),{padding:[90,90]});hasAutoFittedRoute=true}const pointInfo=`MapKit ${exact.length}, guidance ${guidance.length}, history ${history.length}${stale.length?`, старых ${stale.length}`:''}`;toast(`${route.route_source==='exact'?'Точный MapKit-маршрут':'Маршрут'} ${(route.length_m/1000).toFixed(1)} км · ${pointInfo}`)}
   }catch{}finally{routeBusy=false}
 }
 
@@ -166,7 +218,8 @@ async function refreshRouteSources(source='all'){
   }catch(error){toast(error.message,true)}finally{buttons.forEach(button=>button.disabled=false)}
 }
 
-map.on('click',event=>{const point={lat:event.latlng.lat,lon:event.latlng.lng};selectedMarker=setMarker(selectedMarker,point,'selected');$('selectedCoordinate').textContent=formatCoord(point);control({latitude:point.lat,longitude:point.lon,...calibrationPatch()},false).then(()=>toast('Начальная точка передана в AVD')).catch(()=>{})});
+map.on('click',event=>{if(mapClickMode==='inspect'){const nearest=closestRouteSegment(event.latlng);if(!nearest){toast('Сначала загрузите маршрут',true);return}if(nearest.distance>55){toast('Нажмите ближе к линии маршрута',true);return}inspectSegment(nearest.index,nearest.point);return}const point={lat:event.latlng.lat,lon:event.latlng.lng};selectedMarker=setMarker(selectedMarker,point,'selected');$('selectedCoordinate').textContent=formatCoord(point);control({latitude:point.lat,longitude:point.lon,...calibrationPatch()},false).then(()=>toast('Начальная точка передана в AVD')).catch(()=>{})});
+map.on('dragstart zoomstart',()=>{userAdjustedMap=true});
 $('speed').addEventListener('input',()=>{$('speedValue').textContent=$('speed').value;queueControl({target_speed_kmh:number('speed')})});
 $('runButton').addEventListener('click',()=>control({running:true,target_speed_kmh:number('speed'),...calibrationPatch()},false).then(()=>toast('Симуляция запущена')).catch(()=>{}));
 $('stopButton').addEventListener('click',()=>control({running:false},false).then(()=>toast('Симуляция остановлена')).catch(()=>{}));
@@ -194,6 +247,8 @@ $('settingsToggle').addEventListener('click',()=>$('settingsPanel').classList.to
 $('settingsClose').addEventListener('click',()=>$('settingsPanel').classList.remove('open'));
 document.querySelectorAll('#routeLayers button').forEach(button=>button.addEventListener('click',()=>setRouteLayer(button.dataset.layer)));
 $('stalePointsToggle').addEventListener('click',()=>setStalePoints(!showStalePoints));
+document.querySelectorAll('#mapClickMode button').forEach(button=>button.addEventListener('click',()=>setMapClickMode(button.dataset.clickMode)));
+$('segmentInspectorClose').addEventListener('click',closeSegmentInspector);
 
 async function toggleFullscreen(){
   try{
@@ -206,4 +261,4 @@ function fullscreenChanged(){const active=!!(document.fullscreenElement||documen
 $('fullscreenToggle').addEventListener('click',toggleFullscreen);document.addEventListener('fullscreenchange',fullscreenChanged);document.addEventListener('webkitfullscreenchange',fullscreenChanged);window.addEventListener('resize',()=>setTimeout(()=>map.invalidateSize(),80));
 
 const preferences=saved();for(const [id,key] of [['vehicleScale','vehicleScale'],['odoScale','odoScale'],['gpsScale','gpsScale'],['gpsHz','gpsHz'],['token','token']])if(preferences[key]!=null)$(id).value=preferences[key];
-setStalePoints(!!preferences.showStalePoints);setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);
+setStalePoints(!!preferences.showStalePoints);setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);

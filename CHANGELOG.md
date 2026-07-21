@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.3
+
+- Added separate GPS-selection and MapKit-segment inspection click modes.
+- Preserved map center and zoom while captured-route overlays are refreshed.
+
 ## 1.1.2
 
 - Fixed native AVD GPS positioning through the restricted Windows host agent.
