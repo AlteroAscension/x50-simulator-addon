@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed AVD control through a remote Windows ADB server.
+- Added native AVD GPS delivery through `adb emu geo fix`.
+- Preserved the configured Gateway URL during initial browser startup.
+
 ## 1.1.0
 
 - Added end-to-end `x50.exact-route.v2` and `mapkit_route` support.

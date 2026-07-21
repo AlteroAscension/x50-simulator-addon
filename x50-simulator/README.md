@@ -20,8 +20,16 @@
 
 ```yaml
 adb_enabled: true
-adb_host: "192.168.66.124"
-adb_port: 5555
-gateway_url: "http://192.168.66.124:8080"
+adb_host: "192.168.3.75"
+adb_port: 5037
+adb_server_mode: true
+adb_device: "emulator-5554"
+gateway_url: "http://192.168.3.75:18080"
 gateway_token: "x50test"
 ```
+
+For an AVD hosted on another computer, `adb_server_mode: true` connects the
+add-on to that computer's ADB server. The ADB server must listen on the LAN
+interface, and TCP 5037 must be restricted by the host firewall to the Home
+Assistant address. `gateway_url` points to the host-side port forwarded to
+port 8080 inside the AVD.

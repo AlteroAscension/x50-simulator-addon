@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed AVD control from Home Assistant by using the ADB server on the
+  Windows emulator host instead of looking for a local container emulator.
+- Added remote `adb emu geo fix` delivery, preserving native AVD GPS updates.
+- Prevented the browser defaults from overwriting the configured Gateway URL
+  before the first controller-state response arrives.
+
 ## 1.1.0
 
 - Added end-to-end `x50.exact-route.v2` and `mapkit_route` support.

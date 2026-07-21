@@ -1,9 +1,9 @@
 # X50 Telemetry — Home Assistant Add-on Repository
 
-![Add-on Version](https://img.shields.io/badge/Add--on-v1.1.0-blue)
+![Add-on Version](https://img.shields.io/badge/Add--on-v1.1.1-blue)
 ![HA Ingress](https://img.shields.io/badge/HA-Ingress%20Supported-brightgreen)
 
-Репозиторий официального дополнения **X50 Navigation Simulator** (версия **`1.1.0`**) для Home Assistant.
+Репозиторий официального дополнения **X50 Navigation Simulator** (версия **`1.1.1`**) для Home Assistant.
 
 ## Установка дополнения в Home Assistant
 

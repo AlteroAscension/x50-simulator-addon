@@ -187,7 +187,10 @@ class LiveRouteHook:
 class EmulatorGeoConsole:
     """Persistent emulator console connection; avoids adb process jitter per fix."""
 
-    def __init__(self, device: str):
+    def __init__(self, adb: str, device: str, transport: str = "console"):
+        self.adb = adb
+        self.device = device
+        self.transport = transport
         self.port = int(device.rsplit("-", 1)[-1]) if device.startswith("emulator-") else None
         self.connection = None
 
@@ -226,6 +229,16 @@ class EmulatorGeoConsole:
             self._read_response()
 
     def fix(self, longitude: float, latitude: float):
+        if self.transport == "adb":
+            sent_at = time.monotonic()
+            result = subprocess.run(
+                [self.adb, "-s", self.device, "emu", "geo", "fix",
+                 "{:.8f}".format(longitude), "{:.8f}".format(latitude)],
+                capture_output=True, text=True, timeout=3, check=False)
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "adb emu geo fix failed").strip()
+                raise OSError(detail)
+            return sent_at
         last_error = None
         for _ in range(2):
             try:
@@ -246,7 +259,8 @@ class SimulationEngine:
     def __init__(self, adb: str, device: str):
         self.adb = adb
         self.device = device
-        self.geo_console = EmulatorGeoConsole(device)
+        self.geo_console = EmulatorGeoConsole(
+            adb, device, os.environ.get("X50_GEO_TRANSPORT", "console"))
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.closed = False
