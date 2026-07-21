@@ -29,7 +29,10 @@ gateway_token: "x50test"
 ```
 
 For an AVD hosted on another computer, `adb_server_mode: true` connects the
-add-on to that computer's ADB server. The ADB server must listen on the LAN
-interface, and TCP 5037 must be restricted by the host firewall to the Home
-Assistant address. `gateway_url` points to the host-side port forwarded to
-port 8080 inside the AVD.
+add-on to that computer's ADB server. Prefer a restricted Windows TCP proxy
+to the loopback-only ADB server instead of making ADB listen on the whole LAN.
+`gateway_url` points to the host-side port forwarded to port 8080 in the AVD.
+
+The main `X50_telemetry` repository also provides
+`start-x50-ha-avd-bridge.cmd`. On Windows it creates restricted TCP proxies
+for the local ADB server and Gateway without exposing ADB to the whole LAN.
