@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2
+
+- Decoupled live route/control access from trip telemetry: routes may be read
+  directly from the GU VPN address while the journal continuously follows
+  Relay data through `sensor.x50_trip_diagnostics`.
+- Added a 20-second HA sample freshness guard and recorded the journal source
+  in every trip summary.
+
 ## 1.2.1
 
 - Persisted Gateway URL, mode and control token under the add-on `/data`

@@ -148,6 +148,7 @@ class TripLogStore:
             "start_progress_m": progress, "end_progress_m": progress,
             "route_id": data.get("exact_route_id") or context.get("exact_route_id") or "",
             "route_source": data.get("route_source") or context.get("route_source") or "none",
+            "journal_source": context.get("journal_source", "gateway_direct"),
             "samples": 0, "correction_events": 0, "gps_outages": 0,
             "correction_total_m": 0.0, "correction_abs_total_m": 0.0,
             "max_forward_correction_m": 0.0, "max_backward_correction_m": 0.0,
@@ -1035,6 +1036,22 @@ class SimulationEngine:
         self.speed_window.clear()
         self.trace.clear()
 
+    def _ha_trip_diagnostics(self, ha_url, ha_token):
+        ha_state, status = ha_request("states/sensor.x50_trip_diagnostics", "GET",
+                                      ha_url=ha_url, ha_token=ha_token)
+        attributes = ha_state.get("attributes", {}) if isinstance(ha_state, dict) else {}
+        result = dict(attributes.get("fake_nav") or {})
+        if status < 300:
+            result["ok"] = True
+            if attributes.get("vehicle_speed_kmh") is not None:
+                result["vehicle_speed_kmh"] = attributes.get("vehicle_speed_kmh")
+            if attributes.get("odometer_km") is not None:
+                result["odometer_km"] = attributes.get("odometer_km")
+            result["ha_sample_timestamp_ms"] = attributes.get("sample_timestamp_ms")
+        timestamp = finite_number(attributes.get("sample_timestamp_ms"))
+        fresh = timestamp is not None and abs(time.time() * 1000 - timestamp) <= 20000
+        return result, status, fresh
+
     def _poll_status(self):
         with self.lock:
             token = self.token
@@ -1043,25 +1060,25 @@ class SimulationEngine:
             ha_url = self.ha_url
             ha_token = self.ha_token
         if mode == "ha":
-            ha_state, status = ha_request("states/sensor.x50_trip_diagnostics", "GET",
-                                          ha_url=ha_url, ha_token=ha_token)
-            attributes = ha_state.get("attributes", {}) if isinstance(ha_state, dict) else {}
-            result = dict(attributes.get("fake_nav") or {})
-            if status < 300:
-                result["ok"] = True
-                if attributes.get("vehicle_speed_kmh") is not None:
-                    result["vehicle_speed_kmh"] = attributes.get("vehicle_speed_kmh")
-                if attributes.get("odometer_km") is not None:
-                    result["odometer_km"] = attributes.get("odometer_km")
-                result["ha_sample_timestamp_ms"] = attributes.get("sample_timestamp_ms")
+            result, status, ha_fresh = self._ha_trip_diagnostics(ha_url, ha_token)
+            trip_result = result if ha_fresh else None
+            trip_source = "ha_relay"
         else:
             result, status = gateway_request("/api/fake_nav", token=token, base_url=base_url)
+            # Route/control traffic can use the direct VPN address while the
+            # real-trip journal independently follows Relay telemetry in HA.
+            ha_result, ha_status, ha_fresh = self._ha_trip_diagnostics(ha_url, ha_token)
+            trip_result = ha_result if ha_status < 300 and ha_fresh else (
+                result if status < 300 else None)
+            trip_source = "ha_relay" if ha_status < 300 and ha_fresh else "gateway_direct"
         with self.lock:
             self.gateway_online = status < 500
             if status < 300:
                 self.fake_nav = result
-        if status < 300:
-            self.trip_store.observe(result, self._trip_context())
+        if trip_result is not None:
+            context = self._trip_context()
+            context["journal_source"] = trip_source
+            self.trip_store.observe(trip_result, context)
 
     def _prepare_route(self):
         self.route_distances = [0.0]
