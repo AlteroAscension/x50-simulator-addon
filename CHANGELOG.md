@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+- Persistent remote-Gateway configuration and control token.
+- Removed Supervisor-token exposure and browser-side `x50test` overwrite.
+
 ## 1.2.0
 
 - Persistent trip journal with one-second diagnostic samples.

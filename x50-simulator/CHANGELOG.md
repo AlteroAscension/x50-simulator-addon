@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.1
+
+- Persisted Gateway URL, mode and control token under the add-on `/data`
+  directory so Core/add-on restarts no longer reset remote GU access.
+- Stopped exposing the injected Home Assistant Supervisor token through the
+  controller state API.
+- Removed the browser's `x50test` default and automatic token persistence,
+  preventing page startup from overwriting the real head-unit token.
+
 ## 1.2.0
 
 - Added a persistent trip journal under the Home Assistant add-on `/data`

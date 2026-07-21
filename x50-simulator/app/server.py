@@ -630,6 +630,9 @@ class SimulationEngine:
         self.gateway_mode = os.environ.get("X50_GATEWAY_MODE", "direct")
         self.ha_url = os.environ.get("HA_URL", "http://supervisor/core")
         self.ha_token = os.environ.get("SUPERVISOR_TOKEN", "")
+        self.settings_path = Path(os.environ.get(
+            "X50_SETTINGS_PATH", "/data/x50-controller-settings.json"))
+        self._load_settings()
         self.force_route_anchor_pending = False
         self.route_hook = LiveRouteHook(adb, device, os.environ.get("X50_ROUTE_AGENT"))
         self.trip_store = TripLogStore()
@@ -651,6 +654,7 @@ class SimulationEngine:
 
     def update(self, data):
         with self.lock:
+            settings_changed = False
             if "running" in data:
                 self.running = bool(data["running"])
                 self.pending_send = True
@@ -676,20 +680,24 @@ class SimulationEngine:
                 self.pending_send = True
             if "token" in data and str(data["token"]).strip():
                 self.token = str(data["token"]).strip()
+                settings_changed = True
             if "gateway_url" in data and str(data["gateway_url"]).strip():
                 url = str(data["gateway_url"]).strip().rstrip('/')
                 if not url.startswith("http://") and not url.startswith("https://"):
                     url = "http://" + url
                 self.gateway_url = url
+                settings_changed = True
             if "gateway_mode" in data and str(data["gateway_mode"]) in ("direct", "ha"):
                 self.gateway_mode = str(data["gateway_mode"])
+                settings_changed = True
             if "ha_url" in data and str(data["ha_url"]).strip():
                 url = str(data["ha_url"]).strip().rstrip('/')
                 if not url.startswith("http://") and not url.startswith("https://"):
                     url = "http://" + url
                 self.ha_url = url
-            if "ha_token" in data:
-                self.ha_token = str(data["ha_token"]).strip()
+                settings_changed = True
+            # The Supervisor token is injected by Home Assistant and must
+            # never be accepted from or returned to the browser.
             if "latitude" in data and "longitude" in data:
                 lat = clamp(data["latitude"], -90, 90)
                 lon = clamp(data["longitude"], -180, 180)
@@ -704,6 +712,8 @@ class SimulationEngine:
                 self.force_route_anchor_pending = True
                 self.pending_send = True
             self._next_send = min(self._next_send, time.monotonic())
+            if settings_changed:
+                self._save_settings_locked()
         self.wake.set()
         return self.state()
 
@@ -738,7 +748,6 @@ class SimulationEngine:
                 "gateway_url": self.gateway_url,
                 "gateway_mode": self.gateway_mode,
                 "ha_url": self.ha_url,
-                "ha_token": self.ha_token,
                 "last_error": self.last_error,
                 "route_available": bool(self.route_points),
                 "route_revision": self.route_revision,
@@ -759,6 +768,39 @@ class SimulationEngine:
                 "route_hook": self.route_hook.state(),
                 "fake_nav": self.fake_nav,
             }
+
+    def _load_settings(self):
+        try:
+            data = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        token = str(data.get("token", "")).strip()
+        gateway_url = str(data.get("gateway_url", "")).strip()
+        gateway_mode = str(data.get("gateway_mode", "")).strip()
+        ha_url = str(data.get("ha_url", "")).strip()
+        if token:
+            self.token = token
+        if gateway_url.startswith(("http://", "https://")):
+            self.gateway_url = gateway_url.rstrip("/")
+        if gateway_mode in ("direct", "ha"):
+            self.gateway_mode = gateway_mode
+        if ha_url.startswith(("http://", "https://")):
+            self.ha_url = ha_url.rstrip("/")
+
+    def _save_settings_locked(self):
+        payload = {
+            "token": self.token,
+            "gateway_url": self.gateway_url,
+            "gateway_mode": self.gateway_mode,
+            "ha_url": self.ha_url,
+        }
+        try:
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.settings_path.with_suffix(self.settings_path.suffix + ".tmp")
+            temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+            temporary.replace(self.settings_path)
+        except OSError as error:
+            self.last_error = "settings_save_failed: " + str(error)
 
     def route_state(self):
         with self.lock:

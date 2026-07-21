@@ -32,7 +32,7 @@ async function control(patch, quiet=true){try{return await request('/api/control
 function number(id){return Number($(id).value)}
 function pct(id){return number(id)/100}
 function saved(){try{return JSON.parse(localStorage.getItem('x50-simulator')||'{}')}catch{return {}}}
-function persist(extra={}){localStorage.setItem('x50-simulator',JSON.stringify({...saved(),vehicleScale:number('vehicleScale'),odoScale:number('odoScale'),gpsScale:number('gpsScale'),gpsHz:number('gpsHz'),token:$('token').value,...extra}))}
+function persist(extra={}){const previous=saved();delete previous.token;localStorage.setItem('x50-simulator',JSON.stringify({...previous,vehicleScale:number('vehicleScale'),odoScale:number('odoScale'),gpsScale:number('gpsScale'),gpsHz:number('gpsHz'),...extra}))}
 
 function setRouteLayer(mode){
   routeLayerMode=mode;
@@ -130,7 +130,7 @@ function inspectSegment(index,clickPoint=null){
 }
 function closeSegmentInspector(){inspectedSegmentIndex=null;$('segmentInspector').classList.remove('open');segmentHighlight.setLatLngs([]);segmentInspectMarker.remove()}
 
-function calibrationPatch(){persist();return {vehicle_speed_scale:pct('vehicleScale'),odometer_scale:pct('odoScale'),gps_speed_scale:pct('gpsScale'),gps_hz:number('gpsHz'),token:$('token').value,gateway_url:$('gatewayUrl').value,ha_url:$('haUrl').value,ha_token:$('haToken').value,odometer_km:number('odometer')}}
+function calibrationPatch(){persist();const patch={vehicle_speed_scale:pct('vehicleScale'),odometer_scale:pct('odoScale'),gps_speed_scale:pct('gpsScale'),gps_hz:number('gpsHz'),gateway_url:$('gatewayUrl').value,ha_url:$('haUrl').value,odometer_km:number('odometer')};const token=$('token').value.trim();if(token)patch.token=token;return patch}
 let controlTimer;
 function queueControl(patch){clearTimeout(controlTimer);controlTimer=setTimeout(()=>control({...calibrationPatch(),...patch}).catch(()=>{}),70)}
 
@@ -146,7 +146,6 @@ function updateState(next){state=next;
   if(document.activeElement!==$('odometer'))$('odometer').value=next.odometer_km.toFixed(3);
   if(document.activeElement!==$('gatewayUrl')&&next.gateway_url)$('gatewayUrl').value=next.gateway_url;
   if(document.activeElement!==$('haUrl')&&next.ha_url)$('haUrl').value=next.ha_url;
-  if(document.activeElement!==$('haToken')&&next.ha_token!=null)$('haToken').value=next.ha_token;
   $('sentCount').textContent=next.sent_count;$('failedCount').textContent=next.failed_count;
   $('gatewayChip').classList.toggle('online',next.gateway_online);$('gatewayChip').classList.toggle('warn',!next.gateway_online);
   const isHa=next.gateway_mode==='ha';
@@ -293,5 +292,5 @@ async function toggleFullscreen(){
 function fullscreenChanged(){const active=!!(document.fullscreenElement||document.webkitFullscreenElement);$('fullscreenToggle').textContent=active?'↙':'⛶';$('fullscreenToggle').title=active?'Выйти из полноэкранного режима':'Полноэкранный режим';setTimeout(()=>map.invalidateSize(),120)}
 $('fullscreenToggle').addEventListener('click',toggleFullscreen);document.addEventListener('fullscreenchange',fullscreenChanged);document.addEventListener('webkitfullscreenchange',fullscreenChanged);window.addEventListener('resize',()=>setTimeout(()=>map.invalidateSize(),80));
 
-const preferences=saved();for(const [id,key] of [['vehicleScale','vehicleScale'],['odoScale','odoScale'],['gpsScale','gpsScale'],['gpsHz','gpsHz'],['token','token']])if(preferences[key]!=null)$(id).value=preferences[key];
+const preferences=saved();delete preferences.token;for(const [id,key] of [['vehicleScale','vehicleScale'],['odoScale','odoScale'],['gpsScale','gpsScale'],['gpsHz','gpsHz']])if(preferences[key]!=null)$(id).value=preferences[key];
 setStalePoints(!!preferences.showStalePoints);setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);setInterval(()=>pollTrips(false),5000);
