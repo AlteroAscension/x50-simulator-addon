@@ -75,3 +75,17 @@ correction in that interval. Samples also retain fix source/receive age,
 time-alignment prediction, recovery state/mode and discarded Gateway tick time.
 The validation procedure is documented in the main repository at
 `Yandex_navi/GPS_CORRECTION_VALIDATION.md`.
+
+From add-on 1.5.0, a trip also owns the Navigator routes that were active
+during it. Every distinct route is written once as an immutable
+`route_snapshot` containing geometry and the complete captured `mapkit_route`.
+Every activation is a separate `route_switch` record with both the exact
+Gateway activation timestamp and the later add-on observation timestamp. The
+trip drawer draws all versions in stable colours, places a numbered marker at
+the switch position and shows the exact active interval. The **Маршруты**
+button controls this layer independently from the GPS/FakeGPS selector.
+
+Gateway 2.17.0 or newer is recommended for exact switch times. Older Gateway
+versions still produce snapshots, but the add-on must approximate the switch
+from the route capture/poll time. Trips recorded before add-on 1.5.0 remain
+readable and show an explicit message that route geometry was not recorded.

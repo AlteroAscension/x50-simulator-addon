@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0
+
+- Persist every Navigator route geometry used during a trip, including full
+  captured MapKit metadata.
+- Record route switches separately with Gateway activation time, observation
+  time, progress and the nearest real/FakeGPS position.
+- Display all trip route versions in distinct stable colours with numbered
+  switch markers and exact active intervals.
+- Add an independent Navigator-route layer toggle; old trips remain readable.
+
 ## 1.4.0
 
 - Trip GPS quality now follows Gateway's strict freshness and accuracy result;

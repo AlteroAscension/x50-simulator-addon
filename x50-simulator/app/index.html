@@ -74,10 +74,12 @@
             <button data-trip-track="gps">GPS</button>
             <button data-trip-track="fake">FakeGPS</button>
           </div>
+          <button class="small-button active trip-route-toggle" id="tripRouteToggle" aria-pressed="true">Маршруты</button>
           <button class="small-button" id="showTripOnMap" disabled>Показать на карте</button>
           <button class="small-button subtle" id="clearTripFromMap" disabled>Скрыть трек</button>
         </div>
-        <div class="trip-map-legend"><span><i class="real-track"></i>реальный GPS</span><span><i class="fake-track"></i>FakeGPS</span><span><i class="correction-point"></i>коррекция</span><b id="tripTrackStats">Трек не выбран</b></div>
+        <div class="trip-map-legend"><span><i class="real-track"></i>реальный GPS</span><span><i class="fake-track"></i>FakeGPS</span><span><i class="navigator-route"></i>маршруты Навигатора</span><span><i class="correction-point"></i>коррекция</span><b id="tripTrackStats">Трек не выбран</b></div>
+        <div class="trip-route-timeline" id="tripRouteTimeline"><div class="trip-route-empty">Выберите поездку — здесь появятся версии маршрута и точное время переключения.</div></div>
         <canvas id="tripChart" height="170" aria-label="Скорость и GPS-коррекции"></canvas>
         <div class="trip-chart-legend"><span><i class="speed"></i>скорость</span><span><i class="gps"></i>GPS доступен</span><span><i class="correction"></i>коррекция</span></div>
         <div class="trip-events-wrap">
@@ -201,6 +203,6 @@
 
   <div class="toast" id="toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20260722-trip-map-v2"></script>
+<script src="app.js?v=20260722-trip-routes-v1"></script>
 </body>
 </html>

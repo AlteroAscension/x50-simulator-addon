@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from collections import deque
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -116,6 +117,11 @@ class TripLogStore:
         self.last_recovery_correction_count = None
         self.last_gps_good = None
         self.outage = None
+        self.latest_route_snapshot = None
+        self.active_route_snapshot_id = None
+        self.known_route_snapshot_ids = set()
+        self.last_route_switch_ms = None
+        self.last_observed_data = {}
 
     @staticmethod
     def _gps_age(data):
@@ -156,6 +162,7 @@ class TripLogStore:
             "start_progress_m": progress, "end_progress_m": progress,
             "route_id": data.get("exact_route_id") or context.get("exact_route_id") or "",
             "route_source": data.get("route_source") or context.get("route_source") or "none",
+            "route_snapshots": 0, "route_switches": 0, "route_ids": [],
             "journal_source": context.get("journal_source", "gateway_direct"),
             "samples": 0, "correction_events": 0, "gps_outages": 0,
             "correction_operations": 0, "recovery_corrections": 0,
@@ -170,16 +177,81 @@ class TripLogStore:
             finite_number(data.get("recovery_correction_count"), 0) or 0)
         self.last_gps_good = self._gps_good(data)
         self.outage = None
+        self.active_route_snapshot_id = None
+        self.known_route_snapshot_ids = set()
+        self.last_route_switch_ms = None
+        self.last_observed_data = dict(data)
         if not self.last_gps_good:
             self._begin_outage(now_ms, data, context)
         self._append(trip_id, {"kind": "trip_start", "time_ms": now_ms,
                                "route_id": self.active["route_id"], "route_source": self.active["route_source"]})
+        if self.latest_route_snapshot:
+            self._activate_route(self.latest_route_snapshot, now_ms)
         self._save_summary()
 
     def _save_summary(self):
         if self.active:
             _, summary_path = self._paths(self.active["id"])
             self._atomic_json(summary_path, self.active)
+
+    def observe_route(self, snapshot):
+        if not isinstance(snapshot, dict) or not snapshot.get("snapshot_id"):
+            return
+        # Detach the journal copy from mutable SimulationEngine structures.
+        detached = json.loads(json.dumps(snapshot, ensure_ascii=False))
+        with self.lock:
+            self.latest_route_snapshot = detached
+            if self.active:
+                self._activate_route(detached)
+                self._save_summary()
+
+    def _activate_route(self, snapshot, forced_time_ms=None):
+        snapshot_id = str(snapshot.get("snapshot_id", ""))
+        if not snapshot_id or snapshot_id == self.active_route_snapshot_id:
+            return
+        observed_ms = int(finite_number(snapshot.get("observed_at_ms"),
+                                        time.time() * 1000) or time.time() * 1000)
+        activated_ms = int(finite_number(snapshot.get("activated_at_ms"), observed_ms)
+                           or observed_ms)
+        if forced_time_ms is not None:
+            switch_ms = int(forced_time_ms)
+        else:
+            switch_ms = max(int(self.active["started_ms"]), min(observed_ms, activated_ms))
+        if self.last_route_switch_ms is not None:
+            switch_ms = max(switch_ms, self.last_route_switch_ms + 1)
+        if snapshot_id not in self.known_route_snapshot_ids:
+            record = dict(snapshot)
+            record.update({"kind": "route_snapshot", "time_ms": switch_ms})
+            self._append(self.active["id"], record)
+            self.known_route_snapshot_ids.add(snapshot_id)
+            self.active["route_snapshots"] += 1
+            route_id = str(snapshot.get("route_id", ""))
+            if route_id and route_id not in self.active["route_ids"]:
+                self.active["route_ids"].append(route_id)
+        previous_id = self.active_route_snapshot_id
+        last = self.last_observed_data or {}
+        switch = {
+            "kind": "route_switch", "time_ms": switch_ms,
+            "from_snapshot_id": previous_id, "to_snapshot_id": snapshot_id,
+            "route_id": snapshot.get("route_id", ""),
+            "route_source": snapshot.get("route_source", "none"),
+            "route_generation": snapshot.get("route_generation"),
+            "route_activation_count": snapshot.get("route_activation_count"),
+            "observed_at_ms": observed_ms,
+            "gateway_activated_at_ms": snapshot.get("activated_at_ms"),
+            "progress_m": finite_number(last.get("progress_m")),
+            "carlinkit_lat": finite_number(last.get("carlinkit_lat")),
+            "carlinkit_lon": finite_number(last.get("carlinkit_lon")),
+            "fake_lat": finite_number(last.get("fake_lat")),
+            "fake_lon": finite_number(last.get("fake_lon")),
+        }
+        self._append(self.active["id"], switch)
+        self.active_route_snapshot_id = snapshot_id
+        self.last_route_switch_ms = switch_ms
+        self.active["route_switches"] += 1
+        self.active["route_id"] = snapshot.get("route_id", self.active.get("route_id", ""))
+        self.active["route_source"] = snapshot.get("route_source",
+                                                    self.active.get("route_source", "none"))
 
     def _begin_outage(self, now_ms, data, context):
         self.outage = {
@@ -211,6 +283,7 @@ class TripLogStore:
             if name in data:
                 event[name] = data.get(name)
         event.update({
+            "route_snapshot_id": self.active_route_snapshot_id,
             "simulator_running": bool(context.get("running")),
             "target_speed_kmh": context.get("target_speed_kmh"),
             "simulator_odometer_km": context.get("odometer_km"),
@@ -313,6 +386,7 @@ class TripLogStore:
             "running", "target_speed_kmh", "gps_speed_kmh", "vehicle_speed_kmh",
             "measured_gps_speed_kmh", "odometer_km", "route_progress_m",
             "gateway_output_progress_m", "gateway_output_gap_m")}
+        sample["route_snapshot_id"] = self.active_route_snapshot_id
         self._append(self.active["id"], sample)
         self.active["samples"] += 1
 
@@ -326,6 +400,7 @@ class TripLogStore:
         moving = speed >= 1.0 or (bool(context.get("running")) and
                                   (finite_number(context.get("target_speed_kmh"), 0.0) or 0.0) >= 1.0)
         with self.lock:
+            self.last_observed_data = dict(data)
             if self.active is None:
                 if not moving:
                     self.last_observe_monotonic = now_mono
@@ -387,6 +462,9 @@ class TripLogStore:
             self.active = None
             self.outage = None
             self.last_moving_monotonic = None
+            self.active_route_snapshot_id = None
+            self.known_route_snapshot_ids = set()
+            self.last_route_switch_ms = None
             return {"ok": True, "trip": finished}
 
     def list(self):
@@ -408,7 +486,7 @@ class TripLogStore:
         if not summary_path.exists():
             return {"ok": False, "error": "trip_not_found"}, 404
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        samples, events = [], []
+        samples, events, routes, route_switches = [], [], [], []
         if log_path.exists():
             for line in log_path.read_text(encoding="utf-8").splitlines():
                 try:
@@ -419,7 +497,13 @@ class TripLogStore:
                     samples.append(record)
                 elif record.get("kind") == "event":
                     events.append(record)
-        return {"ok": True, "summary": summary, "samples": samples, "events": events}, 200
+                elif record.get("kind") == "route_snapshot":
+                    routes.append(record)
+                elif record.get("kind") == "route_switch":
+                    route_switches.append(record)
+        route_switches.sort(key=lambda item: item.get("time_ms", 0))
+        return {"ok": True, "summary": summary, "samples": samples, "events": events,
+                "routes": routes, "route_switches": route_switches}, 200
 
 
 class LiveRouteHook:
@@ -656,6 +740,10 @@ class SimulationEngine:
         self.route_distances = []
         self.route_length_m = 0.0
         self.route_revision = 0
+        self.route_generation = 0
+        self.route_activation_count = 0
+        self.route_activated_at_ms = 0
+        self.route_identity = ""
         self.route_imported = False
         self.route_progress_m = 0.0
         self.route_changed_at = 0
@@ -874,6 +962,10 @@ class SimulationEngine:
                     "exact_points": self.exact_route_points,
                     "exact_point_count": len(self.exact_route_points),
                     "route_source": self.route_source,
+                    "route_generation": self.route_generation,
+                    "route_activation_count": self.route_activation_count,
+                    "route_activated_at_ms": self.route_activated_at_ms,
+                    "route_identity": self.route_identity,
                     "exact_fresh": self.exact_route_fresh,
                     "exact_available": self.exact_route_available,
                     "exact_route_id": self.exact_route_id,
@@ -885,6 +977,45 @@ class SimulationEngine:
                     "guidance_source_modified_ms": self.guidance_source_modified_ms,
                     "history_source_modified_ms": self.history_source_modified_ms,
                     "source_revision": self.route_source_revision}
+
+    def _route_snapshot_locked(self):
+        points = self.display_route_points or self.route_points
+        if len(points) < 2:
+            return None
+        geometry = [[round(float(point[0]), 7), round(float(point[1]), 7)]
+                    for point in points]
+        mapkit = json.loads(json.dumps(self.mapkit_route, ensure_ascii=False))
+        identity_payload = {
+            "gateway_identity": self.route_identity,
+            "activation": self.route_activation_count,
+            "source_revision": self.route_source_revision,
+            "route_id": self.exact_route_id,
+            "points": geometry,
+        }
+        digest = hashlib.sha256(json.dumps(
+            identity_payload, ensure_ascii=False, separators=(",", ":"),
+            sort_keys=True).encode("utf-8")).hexdigest()[:20]
+        captured_at_ms = finite_number(mapkit.get("captured_at_ms"))
+        activated_at_ms = finite_number(self.route_activated_at_ms,
+                                        finite_number(captured_at_ms,
+                                                      self.route_changed_at))
+        return {
+            "snapshot_id": "route-" + digest,
+            "route_id": self.exact_route_id,
+            "route_source": self.route_source,
+            "route_generation": self.route_generation,
+            "route_activation_count": self.route_activation_count,
+            "gateway_route_identity": self.route_identity,
+            "source_revision": self.route_source_revision,
+            "revision": self.route_revision,
+            "activated_at_ms": activated_at_ms,
+            "captured_at_ms": captured_at_ms,
+            "observed_at_ms": int(time.time() * 1000),
+            "length_m": round(self.route_length_m, 1),
+            "point_count": len(geometry),
+            "points": geometry,
+            "mapkit_route": mapkit,
+        }
 
     def trace_state(self):
         with self.lock:
@@ -1006,6 +1137,7 @@ class SimulationEngine:
             token = self.token
             base_url = self.gateway_url
         result, status = gateway_request("/api/fake_nav/route", token=token, base_url=base_url)
+        snapshot = None
         with self.lock:
             self.gateway_online = status < 500
             if status >= 300:
@@ -1029,6 +1161,10 @@ class SimulationEngine:
                 self.exact_route_phase = str(result.get("exact_phase", ""))
                 self.mapkit_route = dict(result.get("mapkit_route") or {})
                 self.route_source_revision = str(result.get("source_revision", "unavailable"))
+                self.route_generation = int(result.get("route_generation", 0) or 0)
+                self.route_activation_count = int(result.get("route_activation_count", 0) or 0)
+                self.route_activated_at_ms = int(result.get("route_activated_at_ms", 0) or 0)
+                self.route_identity = str(result.get("route_identity", ""))
                 return
             points = []
             for item in result.get("points", []):
@@ -1055,9 +1191,19 @@ class SimulationEngine:
             self.exact_route_phase = str(result.get("exact_phase", ""))
             revision = result.get("revision", 0)
             source_revision = str(result.get("source_revision", revision))
-            if len(points) >= 2 and (revision != self.route_revision
-                                     or source_revision != self.route_source_revision
-                                     or len(points) != len(self.route_points)):
+            route_generation = int(result.get("route_generation", 0) or 0)
+            route_activation_count = int(result.get("route_activation_count", 0) or 0)
+            route_activated_at_ms = int(result.get("route_activated_at_ms", 0) or 0)
+            route_identity = str(result.get("route_identity", ""))
+            gateway_activation_available = route_activation_count > 0 or bool(route_identity)
+            activation_changed = (route_activation_count != self.route_activation_count
+                                  or route_identity != self.route_identity)
+            legacy_route_changed = (revision != self.route_revision
+                                    or source_revision != self.route_source_revision
+                                    or len(points) != len(self.route_points))
+            if len(points) >= 2 and (len(self.route_points) < 2
+                                     or (activation_changed if gateway_activation_available
+                                         else legacy_route_changed)):
                 old_selected = self.selected
                 self._reset_gateway_output_locked("route geometry changed")
                 self.route_source = str(result.get("route_source", "unknown"))
@@ -1075,10 +1221,18 @@ class SimulationEngine:
                 self.guidance_source_modified_ms = int(result.get("guidance_source_modified_ms", 0) or 0)
                 self.history_source_modified_ms = int(result.get("history_source_modified_ms", 0) or 0)
                 self.route_revision = revision
+                self.route_generation = route_generation
+                self.route_activation_count = route_activation_count
+                self.route_activated_at_ms = route_activated_at_ms
+                self.route_identity = route_identity
                 self.route_imported = bool(result.get("imported"))
                 self._prepare_route()
                 self.route_progress_m = self._project_progress(old_selected) if old_selected else 0.0
                 self.route_changed_at = int(time.time() * 1000)
+                snapshot = self._route_snapshot_locked()
+        if snapshot:
+            # Route JSON can be large; journal I/O must not hold the simulation lock.
+            self.trip_store.observe_route(snapshot)
 
     def _reset_gateway_output_locked(self, reason):
         self.gateway_fake_point = None
