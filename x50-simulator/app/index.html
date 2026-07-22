@@ -68,6 +68,16 @@
       <div class="trip-list" id="tripList"><div class="trip-empty">Поездки появятся после начала движения</div></div>
       <div class="trip-detail" id="tripDetail">
         <div class="trip-summary" id="tripSummary"><span>Выберите поездку</span></div>
+        <div class="trip-map-toolbar">
+          <div class="trip-track-switch" id="tripTrackMode" aria-label="Слои трека поездки">
+            <button data-trip-track="both" class="active">GPS + Fake</button>
+            <button data-trip-track="gps">GPS</button>
+            <button data-trip-track="fake">FakeGPS</button>
+          </div>
+          <button class="small-button" id="showTripOnMap" disabled>Показать на карте</button>
+          <button class="small-button subtle" id="clearTripFromMap" disabled>Скрыть трек</button>
+        </div>
+        <div class="trip-map-legend"><span><i class="real-track"></i>реальный GPS</span><span><i class="fake-track"></i>FakeGPS</span><span><i class="correction-point"></i>коррекция</span><b id="tripTrackStats">Трек не выбран</b></div>
         <canvas id="tripChart" height="170" aria-label="Скорость и GPS-коррекции"></canvas>
         <div class="trip-chart-legend"><span><i class="speed"></i>скорость</span><span><i class="gps"></i>GPS доступен</span><span><i class="correction"></i>коррекция</span></div>
         <div class="trip-events-wrap">
@@ -191,6 +201,6 @@
 
   <div class="toast" id="toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=20260722-persistent-gateway-v1"></script>
+  <script src="app.js?v=20260722-trip-map-v1"></script>
 </body>
 </html>

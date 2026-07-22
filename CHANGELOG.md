@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- Trip routes can now be displayed on the simulator map.
+- Separate real-GPS and FakeGPS tracks plus correction markers make drift and
+  subsequent GPS catch-up visible for calibration analysis.
+
 ## 1.2.2
 
 - Decoupled direct GU route access from HA/Relay real-trip logging.

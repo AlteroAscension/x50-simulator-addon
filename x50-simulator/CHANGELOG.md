@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0
+
+- Added trip playback on the main map from the persistent journal.
+- Real Carlinkit GPS and injected FakeGPS are separate selectable tracks.
+- GPS correction/reacquisition events are shown as markers; when both positions
+  exist, a connector visualizes the actual correction vector.
+- Selecting a trip updates overlays without moving the map. The explicit
+  "Show on map" action fits the selected track and closes the journal drawer.
+
 ## 1.2.2
 
 - Decoupled live route/control access from trip telemetry: routes may be read
