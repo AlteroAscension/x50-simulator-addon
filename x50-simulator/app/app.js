@@ -193,11 +193,18 @@ function validTripPoint(record,latKey,lonKey){
   return Number.isFinite(lat)&&Number.isFinite(lon)&&Math.abs(lat)<=90&&Math.abs(lon)<=180?[lat,lon]:null;
 }
 function splitTripTrack(samples,latKey,lonKey,requireGoodGps=false){
+  const timestamps=samples.map(sample=>Number(sample.time_ms)).filter(Number.isFinite).sort((a,b)=>a-b),gaps=[];
+  for(let index=1;index<timestamps.length;index++){const gap=timestamps[index]-timestamps[index-1];if(gap>0)gaps.push(gap)}
+  gaps.sort((a,b)=>a-b);
+  const medianGap=gaps.length?gaps[Math.floor(gaps.length/2)]:5000;
+  // HA relay normally records every ~5 s. Treat only a gap several times longer
+  // than the actual journal cadence as a break in the driven track.
+  const breakAfterMs=Math.max(15000,Math.min(120000,medianGap*3.5));
   const segments=[];let segment=[],previousTime=null,previousPoint=null;
   const flush=()=>{if(segment.length)segments.push(segment);segment=[];previousPoint=null};
   for(const sample of samples){
     const point=validTripPoint(sample,latKey,lonKey),time=Number(sample.time_ms);
-    if(!point||(requireGoodGps&&!sample.gps_good)||(previousTime!=null&&time-previousTime>5000)){flush();previousTime=time;continue}
+    if(!point||(requireGoodGps&&!sample.gps_good)||(previousTime!=null&&time-previousTime>breakAfterMs)){flush();previousTime=time;continue}
     previousTime=time;
     if(previousPoint&&map.distance(previousPoint,point)<.5)continue;
     segment.push(point);previousPoint=point;
