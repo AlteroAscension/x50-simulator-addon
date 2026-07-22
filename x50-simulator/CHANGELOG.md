@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- Trip GPS quality now follows Gateway's strict freshness and accuracy result;
+  a newly received coordinate with unusable accuracy no longer closes an outage.
+- Trip events use Gateway's cumulative signed and absolute correction counters,
+  preserving all corrections made between HA polls.
+- Store time-alignment, prediction, recovery-mode and tick-loss diagnostics for
+  evaluating Gateway 2.16.0 drives.
+
 ## 1.3.1
 
 - Исправлена отрисовка трека поездки при фактическом интервале журнала чуть больше 5 секунд.

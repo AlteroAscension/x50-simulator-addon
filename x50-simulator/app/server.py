@@ -111,6 +111,9 @@ class TripLogStore:
         self.last_observe_monotonic = None
         self.last_moving_monotonic = None
         self.last_correction_count = None
+        self.last_correction_total_m = None
+        self.last_correction_abs_total_m = None
+        self.last_recovery_correction_count = None
         self.last_gps_good = None
         self.outage = None
 
@@ -120,8 +123,13 @@ class TripLogStore:
 
     @classmethod
     def _gps_good(cls, data):
+        if data.get("real_gps_quality_good") is not None:
+            return bool(data.get("real_gps_quality_good"))
         age = cls._gps_age(data)
-        return age is not None and age <= 3000 and data.get("carlinkit_lat") is not None
+        accuracy = finite_number(data.get("carlinkit_accuracy_m"))
+        return (age is not None and age <= 3000
+                and accuracy is not None and 0 < accuracy <= 35
+                and data.get("carlinkit_lat") is not None)
 
     def _paths(self, trip_id):
         return self.root / (trip_id + ".jsonl"), self.root / (trip_id + ".summary.json")
@@ -150,11 +158,16 @@ class TripLogStore:
             "route_source": data.get("route_source") or context.get("route_source") or "none",
             "journal_source": context.get("journal_source", "gateway_direct"),
             "samples": 0, "correction_events": 0, "gps_outages": 0,
+            "correction_operations": 0, "recovery_corrections": 0,
             "correction_total_m": 0.0, "correction_abs_total_m": 0.0,
             "max_forward_correction_m": 0.0, "max_backward_correction_m": 0.0,
             "max_speed_kmh": 0.0, "finish_reason": None,
         }
         self.last_correction_count = int(finite_number(data.get("correction_count"), 0) or 0)
+        self.last_correction_total_m = finite_number(data.get("correction_total_m"))
+        self.last_correction_abs_total_m = finite_number(data.get("correction_abs_total_m"))
+        self.last_recovery_correction_count = int(
+            finite_number(data.get("recovery_correction_count"), 0) or 0)
         self.last_gps_good = self._gps_good(data)
         self.outage = None
         if not self.last_gps_good:
@@ -175,6 +188,7 @@ class TripLogStore:
             "progress_m": finite_number(data.get("progress_m"), finite_number(context.get("route_progress_m"))),
             "route_match_progress_m": finite_number(data.get("route_match_progress_m")),
             "integrated_m": 0.0,
+            "correction_total_m": finite_number(data.get("correction_total_m")),
         }
 
     def _event_base(self, now_ms, data, context):
@@ -183,7 +197,13 @@ class TripLogStore:
             "odometer_delta_m", "corrected_delta_m", "distance_factor", "speed_factor",
             "progress_m", "route_match_progress_m", "route_match_distance_m", "gps_gap_m",
             "real_gps_age_ms", "carlinkit_fix_age_ms", "carlinkit_accuracy_m",
+            "real_gps_received_age_ms", "real_gps_fix_time_ms", "real_gps_quality_good",
             "last_progress_correction_m", "last_correction_weight", "correction_count",
+            "correction_target_progress_m", "correction_prediction_m", "correction_fix_age_ms",
+            "correction_fix_time_ms", "correction_mode", "correction_total_m",
+            "correction_abs_total_m", "recovery_correction_count", "gps_recovery_pending",
+            "gps_recovery_candidate_fixes", "gps_outage_age_ms", "last_gps_recovery_outage_ms",
+            "tick_raw_dt_ms", "tick_max_raw_dt_ms", "tick_discarded_time_ms",
             "rejected_corrections", "progress_source", "carlinkit_lat", "carlinkit_lon",
             "fake_lat", "fake_lon")
         event = {"kind": "event", "time_ms": now_ms}
@@ -201,16 +221,37 @@ class TripLogStore:
         return event
 
     def _record_correction(self, now_ms, data, context, previous_count, current_count):
-        correction = finite_number(data.get("last_progress_correction_m"), 0.0) or 0.0
+        batch = max(1, current_count - previous_count)
+        current_total = finite_number(data.get("correction_total_m"))
+        current_abs_total = finite_number(data.get("correction_abs_total_m"))
+        last_single = finite_number(data.get("last_progress_correction_m"), 0.0) or 0.0
+        correction = last_single
+        correction_abs = abs(correction)
+        if current_total is not None and self.last_correction_total_m is not None:
+            correction = current_total - self.last_correction_total_m
+        if current_abs_total is not None and self.last_correction_abs_total_m is not None:
+            correction_abs = max(0.0, current_abs_total - self.last_correction_abs_total_m)
         event = self._event_base(now_ms, data, context)
         event.update({"event": "gps_progress_correction", "correction_m": correction,
-                      "corrections_since_sample": max(1, current_count - previous_count)})
+                      "correction_abs_m": correction_abs,
+                      "last_single_correction_m": last_single,
+                      "corrections_since_sample": batch})
         self._append(self.active["id"], event)
         self.active["correction_events"] += 1
+        self.active["correction_operations"] += batch
+        current_recovery_count = int(
+            finite_number(data.get("recovery_correction_count"),
+                          self.last_recovery_correction_count or 0) or 0)
+        if self.last_recovery_correction_count is not None:
+            self.active["recovery_corrections"] += max(
+                0, current_recovery_count - self.last_recovery_correction_count)
         self.active["correction_total_m"] += correction
-        self.active["correction_abs_total_m"] += abs(correction)
-        self.active["max_forward_correction_m"] = max(self.active["max_forward_correction_m"], correction)
-        self.active["max_backward_correction_m"] = min(self.active["max_backward_correction_m"], correction)
+        self.active["correction_abs_total_m"] += correction_abs
+        self.active["max_forward_correction_m"] = max(self.active["max_forward_correction_m"], last_single)
+        self.active["max_backward_correction_m"] = min(self.active["max_backward_correction_m"], last_single)
+        self.last_correction_total_m = current_total
+        self.last_correction_abs_total_m = current_abs_total
+        self.last_recovery_correction_count = current_recovery_count
 
     def _finish_outage(self, now_ms, data, context):
         if not self.outage:
@@ -221,9 +262,13 @@ class TripLogStore:
         match_progress = finite_number(data.get("route_match_progress_m"))
         start_odo = self.outage.get("odometer_km")
         start_progress = self.outage.get("progress_m")
-        correction = finite_number(data.get("last_progress_correction_m"))
-        if correction is None and match_progress is not None and current_progress is not None:
-            correction = match_progress - current_progress
+        current_correction_total = finite_number(data.get("correction_total_m"))
+        outage_correction_total = self.outage.get("correction_total_m")
+        correction = (None if current_correction_total is None or outage_correction_total is None
+                      else current_correction_total - outage_correction_total)
+        target_progress = finite_number(data.get("correction_target_progress_m"), match_progress)
+        residual = (None if target_progress is None or current_progress is None
+                    else target_progress - current_progress)
         event.update({
             "event": "gps_reacquired", "outage_started_ms": self.outage["started_ms"],
             "outage_duration_s": round((now_ms - self.outage["started_ms"]) / 1000.0, 3),
@@ -237,6 +282,8 @@ class TripLogStore:
             "progress_during_outage_m": (None if current_progress is None or start_progress is None
                                           else round(current_progress - start_progress, 3)),
             "gps_catch_up_m": None if correction is None else round(correction, 3),
+            "gps_residual_m": None if residual is None else round(residual, 3),
+            "gps_recovery_mode": data.get("correction_mode"),
         })
         self._append(self.active["id"], event)
         self.active["gps_outages"] += 1
@@ -248,9 +295,15 @@ class TripLogStore:
             "odometer_km", "odometer_delta_m", "corrected_delta_m", "distance_factor",
             "distance_calibration_count", "progress_source", "route_length_m", "progress_m",
             "route_match_progress_m", "route_match_distance_m", "last_progress_correction_m",
-            "last_correction_weight", "real_gps_age_ms", "carlinkit_fix_age_ms", "carlinkit_lat",
+            "last_correction_weight", "correction_target_progress_m", "correction_prediction_m",
+            "correction_fix_age_ms", "correction_fix_time_ms", "correction_mode",
+            "correction_total_m", "correction_abs_total_m", "recovery_correction_count",
+            "gps_recovery_pending", "gps_recovery_candidate_fixes", "gps_outage_age_ms",
+            "last_gps_recovery_outage_ms", "real_gps_age_ms", "real_gps_received_age_ms",
+            "real_gps_fix_time_ms", "real_gps_quality_good", "carlinkit_fix_age_ms", "carlinkit_lat",
             "carlinkit_lon", "carlinkit_accuracy_m", "carlinkit_speed_kmh", "carlinkit_bearing",
             "gps_gap_m", "correction_count", "rejected_corrections", "injected_count",
+            "tick_raw_dt_ms", "tick_max_raw_dt_ms", "tick_discarded_time_ms",
             "fake_lat", "fake_lon", "exact_route_id", "route_source")
         sample = {"kind": "sample", "time_ms": now_ms, "gps_good": self._gps_good(data)}
         for name in keys:
@@ -299,6 +352,11 @@ class TripLogStore:
             correction_count = int(finite_number(data.get("correction_count"), self.last_correction_count or 0) or 0)
             if self.last_correction_count is not None and correction_count > self.last_correction_count:
                 self._record_correction(now_ms, data, context, self.last_correction_count, correction_count)
+            elif self.last_correction_count is not None and correction_count < self.last_correction_count:
+                self.last_correction_total_m = finite_number(data.get("correction_total_m"))
+                self.last_correction_abs_total_m = finite_number(data.get("correction_abs_total_m"))
+                self.last_recovery_correction_count = int(
+                    finite_number(data.get("recovery_correction_count"), 0) or 0)
             self.last_correction_count = correction_count
             odometer = finite_number(data.get("odometer_km"), finite_number(context.get("odometer_km")))
             progress = finite_number(data.get("progress_m"), finite_number(context.get("route_progress_m")))

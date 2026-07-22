@@ -66,3 +66,12 @@ GET  /api/controller/trips
 GET  /api/controller/trips/<trip-id>
 POST /api/controller/trips/finish
 ```
+
+From add-on 1.4.0, `gps_good` uses Gateway's strict
+`real_gps_quality_good` flag (age <= 3 s and accuracy <= 35 m). Correction
+events use differences between Gateway's cumulative `correction_total_m` and
+`correction_abs_total_m`, so a five-second HA poll preserves every internal
+correction in that interval. Samples also retain fix source/receive age,
+time-alignment prediction, recovery state/mode and discarded Gateway tick time.
+The validation procedure is documented in the main repository at
+`Yandex_navi/GPS_CORRECTION_VALIDATION.md`.
