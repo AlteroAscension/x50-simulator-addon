@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0
+
+- Persist off-route passthrough state, distance, confirmation/recovery counters
+  and GPS-to-vehicle speed difference in every trip sample and event.
+- Persist route generation, activation, identity and exact-route freshness so a
+  stuck passthrough can be distinguished from a stale MapKit capture.
+
 ## 1.5.0
 
 - Persist every Navigator route geometry used during a trip, including full

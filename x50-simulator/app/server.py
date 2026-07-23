@@ -277,7 +277,14 @@ class TripLogStore:
             "gps_recovery_candidate_fixes", "gps_outage_age_ms", "last_gps_recovery_outage_ms",
             "tick_raw_dt_ms", "tick_max_raw_dt_ms", "tick_discarded_time_ms",
             "rejected_corrections", "progress_source", "carlinkit_lat", "carlinkit_lon",
-            "fake_lat", "fake_lon")
+            "fake_lat", "fake_lon", "off_route_passthrough", "off_route_distance_m",
+            "off_route_candidate_fixes", "off_route_recovery_fixes",
+            "off_route_started_ms", "off_route_elapsed_ms",
+            "off_route_started_route_generation", "gps_vehicle_speed_difference_kmh",
+            "route_generation", "route_activation_count", "route_activated_at_ms",
+            "route_identity", "route_source", "exact_route_fresh",
+            "exact_route_available", "exact_route_id", "exact_route_captured_ms",
+            "exact_route_producer", "fake_provider_enabled", "route_reanchor_pending")
         event = {"kind": "event", "time_ms": now_ms}
         for name in fields:
             if name in data:
@@ -377,7 +384,14 @@ class TripLogStore:
             "carlinkit_lon", "carlinkit_accuracy_m", "carlinkit_speed_kmh", "carlinkit_bearing",
             "gps_gap_m", "correction_count", "rejected_corrections", "injected_count",
             "tick_raw_dt_ms", "tick_max_raw_dt_ms", "tick_discarded_time_ms",
-            "fake_lat", "fake_lon", "exact_route_id", "route_source")
+            "fake_lat", "fake_lon", "off_route_passthrough", "off_route_distance_m",
+            "off_route_candidate_fixes", "off_route_recovery_fixes",
+            "off_route_started_ms", "off_route_elapsed_ms",
+            "off_route_started_route_generation", "gps_vehicle_speed_difference_kmh",
+            "route_generation", "route_activation_count", "route_activated_at_ms",
+            "route_identity", "route_source", "exact_route_fresh",
+            "exact_route_available", "exact_route_id", "exact_route_captured_ms",
+            "exact_route_producer", "fake_provider_enabled", "route_reanchor_pending")
         sample = {"kind": "sample", "time_ms": now_ms, "gps_good": self._gps_good(data)}
         for name in keys:
             if name in data:

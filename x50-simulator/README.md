@@ -89,3 +89,9 @@ Gateway 2.17.0 or newer is recommended for exact switch times. Older Gateway
 versions still produce snapshots, but the add-on must approximate the switch
 from the route capture/poll time. Trips recorded before add-on 1.5.0 remain
 readable and show an explicit message that route geometry was not recorded.
+
+From add-on 1.6.0, every trip sample and event also retains the complete
+FakeGPS passthrough state: off-route distance, trigger/recovery fix counters,
+GPS-to-vehicle speed difference, route generation/activation/identity and
+exact-route freshness. This makes it possible to distinguish a real route
+departure from a stale MapKit route and to verify automatic rejoin afterward.
