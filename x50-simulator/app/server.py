@@ -98,7 +98,7 @@ class TripLogStore:
     SAMPLE_INTERVAL_S = 1.0
     STOP_TIMEOUT_S = 180.0
 
-    def __init__(self, root=None):
+    def __init__(self, root=None, device_kind="unknown"):
         requested = Path(root or os.environ.get("X50_TRIP_DIR", "/data/x50-trips"))
         try:
             requested.mkdir(parents=True, exist_ok=True)
@@ -106,6 +106,7 @@ class TripLogStore:
         except OSError:
             self.root = ROOT / ".x50-trips"
             self.root.mkdir(parents=True, exist_ok=True)
+        self.device_kind = str(device_kind or "unknown")
         self.lock = threading.RLock()
         self.active = None
         self.last_sample_monotonic = 0.0
@@ -164,6 +165,7 @@ class TripLogStore:
             "route_source": data.get("route_source") or context.get("route_source") or "none",
             "route_snapshots": 0, "route_switches": 0, "route_ids": [],
             "journal_source": context.get("journal_source", "gateway_direct"),
+            "device_kind": context.get("device_kind", self.device_kind),
             "samples": 0, "correction_events": 0, "gps_outages": 0,
             "correction_operations": 0, "recovery_corrections": 0,
             "correction_total_m": 0.0, "correction_abs_total_m": 0.0,
@@ -184,7 +186,10 @@ class TripLogStore:
         if not self.last_gps_good:
             self._begin_outage(now_ms, data, context)
         self._append(trip_id, {"kind": "trip_start", "time_ms": now_ms,
-                               "route_id": self.active["route_id"], "route_source": self.active["route_source"]})
+                               "route_id": self.active["route_id"],
+                               "route_source": self.active["route_source"],
+                               "journal_source": self.active["journal_source"],
+                               "device_kind": self.active["device_kind"]})
         if self.latest_route_snapshot:
             self._activate_route(self.latest_route_snapshot, now_ms)
         self._save_summary()
@@ -291,6 +296,8 @@ class TripLogStore:
                 event[name] = data.get(name)
         event.update({
             "route_snapshot_id": self.active_route_snapshot_id,
+            "journal_source": context.get("journal_source", "gateway_direct"),
+            "device_kind": context.get("device_kind", self.device_kind),
             "simulator_running": bool(context.get("running")),
             "target_speed_kmh": context.get("target_speed_kmh"),
             "simulator_odometer_km": context.get("odometer_km"),
@@ -392,7 +399,9 @@ class TripLogStore:
             "route_identity", "route_source", "exact_route_fresh",
             "exact_route_available", "exact_route_id", "exact_route_captured_ms",
             "exact_route_producer", "fake_provider_enabled", "route_reanchor_pending")
-        sample = {"kind": "sample", "time_ms": now_ms, "gps_good": self._gps_good(data)}
+        sample = {"kind": "sample", "time_ms": now_ms, "gps_good": self._gps_good(data),
+                  "journal_source": context.get("journal_source", "gateway_direct"),
+                  "device_kind": context.get("device_kind", self.device_kind)}
         for name in keys:
             if name in data:
                 sample[name] = data.get(name)
@@ -518,6 +527,57 @@ class TripLogStore:
         route_switches.sort(key=lambda item: item.get("time_ms", 0))
         return {"ok": True, "summary": summary, "samples": samples, "events": events,
                 "routes": routes, "route_switches": route_switches}, 200
+
+
+class TripLogRegistry:
+    """Independent concurrent journals for the real head unit and AVD."""
+
+    DEVICE_KINDS = ("head_unit", "avd")
+
+    def __init__(self, root=None):
+        self.stores = {
+            kind: TripLogStore(root=root, device_kind=kind)
+            for kind in self.DEVICE_KINDS
+        }
+
+    @staticmethod
+    def normalize_kind(value):
+        value = str(value or "").strip().lower()
+        return "avd" if value in ("avd", "emulator") else "head_unit"
+
+    def observe(self, device_kind, data, context):
+        kind = self.normalize_kind(device_kind)
+        scoped = dict(context or {})
+        scoped["device_kind"] = kind
+        self.stores[kind].observe(data, scoped)
+
+    def observe_route(self, snapshot, device_kind):
+        kind = self.normalize_kind(device_kind)
+        scoped = dict(snapshot or {})
+        scoped["device_kind"] = kind
+        self.stores[kind].observe_route(scoped)
+
+    def finish(self, reason="manual"):
+        finished = []
+        for store in self.stores.values():
+            result = store.finish(reason)
+            if result.get("trip"):
+                finished.append(result["trip"])
+        return {"ok": True, "trips": finished,
+                "trip": finished[0] if len(finished) == 1 else None}
+
+    def list(self):
+        # Both stores intentionally share the same persistent directory.
+        payload = self.stores["head_unit"].list()
+        active_ids = [
+            store.active.get("id") for store in self.stores.values() if store.active
+        ]
+        payload["active_trip_ids"] = active_ids
+        payload["active_trip_id"] = active_ids[0] if active_ids else None
+        return payload
+
+    def detail(self, trip_id):
+        return self.stores["head_unit"].detail(trip_id)
 
 
 class LiveRouteHook:
@@ -758,6 +818,7 @@ class SimulationEngine:
         self.route_activation_count = 0
         self.route_activated_at_ms = 0
         self.route_identity = ""
+        self.gateway_device_kind = "avd"
         self.route_imported = False
         self.route_progress_m = 0.0
         self.route_changed_at = 0
@@ -796,7 +857,7 @@ class SimulationEngine:
         self._load_settings()
         self.force_route_anchor_pending = False
         self.route_hook = LiveRouteHook(adb, device, os.environ.get("X50_ROUTE_AGENT"))
-        self.trip_store = TripLogStore()
+        self.trip_store = TripLogRegistry()
         self._last_integrate = time.monotonic()
         self._next_send = self._last_integrate
         self._next_route_poll = 0.0
@@ -980,6 +1041,7 @@ class SimulationEngine:
                     "route_activation_count": self.route_activation_count,
                     "route_activated_at_ms": self.route_activated_at_ms,
                     "route_identity": self.route_identity,
+                    "device_kind": self.gateway_device_kind,
                     "exact_fresh": self.exact_route_fresh,
                     "exact_available": self.exact_route_available,
                     "exact_route_id": self.exact_route_id,
@@ -1015,6 +1077,7 @@ class SimulationEngine:
                                                       self.route_changed_at))
         return {
             "snapshot_id": "route-" + digest,
+            "device_kind": self.gateway_device_kind,
             "route_id": self.exact_route_id,
             "route_source": self.route_source,
             "route_generation": self.route_generation,
@@ -1156,6 +1219,8 @@ class SimulationEngine:
             self.gateway_online = status < 500
             if status >= 300:
                 return
+            self.gateway_device_kind = TripLogRegistry.normalize_kind(
+                result.get("device_kind", self.gateway_device_kind))
             if not result.get("available"):
                 self._reset_gateway_output_locked("route unavailable")
                 self.route_points = []
@@ -1246,7 +1311,7 @@ class SimulationEngine:
                 snapshot = self._route_snapshot_locked()
         if snapshot:
             # Route JSON can be large; journal I/O must not hold the simulation lock.
-            self.trip_store.observe_route(snapshot)
+            self.trip_store.observe_route(snapshot, snapshot.get("device_kind", "avd"))
 
     def _reset_gateway_output_locked(self, reason):
         self.gateway_fake_point = None
@@ -1285,26 +1350,44 @@ class SimulationEngine:
             mode = self.gateway_mode
             ha_url = self.ha_url
             ha_token = self.ha_token
-        if mode == "ha":
-            result, status, ha_fresh = self._ha_trip_diagnostics(ha_url, ha_token)
-            trip_result = result if ha_fresh else None
-            trip_source = "ha_relay"
-        else:
-            result, status = gateway_request("/api/fake_nav", token=token, base_url=base_url)
-            # Route/control traffic can use the direct VPN address while the
-            # real-trip journal independently follows Relay telemetry in HA.
-            ha_result, ha_status, ha_fresh = self._ha_trip_diagnostics(ha_url, ha_token)
-            trip_result = ha_result if ha_status < 300 and ha_fresh else (
-                result if status < 300 else None)
-            trip_source = "ha_relay" if ha_status < 300 and ha_fresh else "gateway_direct"
+        result, status = gateway_request("/api/fake_nav", token=token, base_url=base_url)
+        ha_result, ha_status, ha_fresh = self._ha_trip_diagnostics(ha_url, ha_token)
+        direct_kind = TripLogRegistry.normalize_kind(
+            result.get("device_kind", self.gateway_device_kind)
+            if isinstance(result, dict) else self.gateway_device_kind)
         with self.lock:
-            self.gateway_online = status < 500
+            self.gateway_online = (ha_status < 500) if mode == "ha" else (status < 500)
             if status < 300:
                 self.fake_nav = result
-        if trip_result is not None:
-            context = self._trip_context()
-            context["journal_source"] = trip_source
-            self.trip_store.observe(trip_result, context)
+                self.gateway_device_kind = direct_kind
+            elif mode == "ha" and ha_status < 300:
+                self.fake_nav = ha_result
+
+        # Relay/HA is the authoritative real-head-unit stream. The direct
+        # Gateway may simultaneously point to the AVD; journal both streams in
+        # independent sessions instead of falling back between them inside one
+        # trip whenever HA briefly becomes stale.
+        if ha_status < 300 and ha_fresh:
+            real_context = {
+                "running": False,
+                "target_speed_kmh": None,
+                "gps_speed_kmh": None,
+                "vehicle_speed_kmh": ha_result.get("vehicle_speed_kmh"),
+                "measured_gps_speed_kmh": None,
+                "odometer_km": ha_result.get("odometer_km"),
+                "route_progress_m": ha_result.get("progress_m"),
+                "gateway_output_progress_m": None,
+                "gateway_output_gap_m": None,
+                "route_source": ha_result.get("route_source"),
+                "exact_route_id": ha_result.get("exact_route_id"),
+                "journal_source": "ha_relay",
+            }
+            self.trip_store.observe("head_unit", ha_result, real_context)
+
+        if status < 300 and (direct_kind == "avd" or not ha_fresh):
+            direct_context = self._trip_context()
+            direct_context["journal_source"] = "gateway_direct"
+            self.trip_store.observe(direct_kind, result, direct_context)
 
     def _prepare_route(self):
         self.route_distances = [0.0]

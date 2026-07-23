@@ -1,6 +1,6 @@
 name: "X50 Navigation Simulator"
 slug: "x50_simulator"
-version: "1.6.0"
+version: "1.7.0"
 description: "Асинхронный симулятор движения и подмены GPS координат для Belgee X50 / Geely Coolray"
 url: "https://github.com/AlteroAscension/x50-simulator-addon"
 changelog: "https://github.com/AlteroAscension/x50-simulator-addon/blob/main/x50-simulator/CHANGELOG.md"

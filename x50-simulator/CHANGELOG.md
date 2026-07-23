@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0
+
+- Split the trip journal by device identity so HA/Relay and AVD data never
+  share one session.
+- Label trip cards and details with their source device.
+- Keep route snapshots scoped to the device that produced them.
+
 ## 1.6.0
 
 - Persist off-route passthrough state, distance, confirmation/recovery counters

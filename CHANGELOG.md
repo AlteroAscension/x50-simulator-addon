@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.0
+
+- Trips from the real head unit (`HA/Relay`) and the directly connected AVD
+  are recorded concurrently in independent sessions.
+- Trip cards are explicitly marked `ГУ` or `AVD`; older unclassified journals
+  are marked `СТАРАЯ`.
+- Direct AVD route snapshots can no longer be attached to a real-head-unit
+  trip.
+
 ## 1.6.0
 
 - Persist off-route passthrough state, distance, confirmation/recovery counters
