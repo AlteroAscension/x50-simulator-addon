@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1
+
+- Rename the FakeGPS control feedback to identify X50 Navigation as the owner;
+  Gateway remains only the compatibility transport.
+
 ## 1.7.0
 
 - Split the trip journal by device identity so HA/Relay and AVD data never

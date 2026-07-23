@@ -333,7 +333,7 @@ $('runButton').addEventListener('click',()=>control({running:true,target_speed_k
 $('stopButton').addEventListener('click',()=>control({running:false},false).then(()=>toast('Симуляция остановлена')).catch(()=>{}));
 $('sendNow').addEventListener('click',()=>control({send_now:true,odometer_km:number('odometer')},false).then(()=>toast('Состояние отправлено')).catch(()=>{}));
 document.querySelectorAll('#gpsMode button').forEach(button=>button.addEventListener('click',()=>control({gps_mode:button.dataset.mode},false).then(()=>toast(button.dataset.mode==='route'?'FakeGPS по маршруту':'Статичная GPS-точка')).catch(()=>{})));
-$('gatewayFake').addEventListener('change',async event=>{try{await request('/api/controller/fake-nav',{method:'POST',body:JSON.stringify({enabled:event.target.checked})});toast(`Gateway Fake ${event.target.checked?'включён':'выключен'}`)}catch(error){event.target.checked=!event.target.checked;toast(error.message,true)}});
+$('gatewayFake').addEventListener('change',async event=>{try{await request('/api/controller/fake-nav',{method:'POST',body:JSON.stringify({enabled:event.target.checked})});toast(`Navigation FakeGPS ${event.target.checked?'включён':'выключен'}`)}catch(error){event.target.checked=!event.target.checked;toast(error.message,true)}});
 ['vehicleScale','odoScale','gpsScale','gpsHz','odometer','token','gatewayUrl','haUrl','haToken'].forEach(id=>$(id).addEventListener('change',()=>queueControl({})));
 $('gatewayChip').addEventListener('click',()=>{$('settingsPanel').classList.add('open');$('gatewayUrl').focus()});
 $('setGwavd').addEventListener('click',()=>{$('gatewayUrl').value='http://127.0.0.1:8080';queueControl({gateway_mode:'direct',gateway_url:'http://127.0.0.1:8080'});toast('Выбран режим: 💻 AVD (127.0.0.1)')});

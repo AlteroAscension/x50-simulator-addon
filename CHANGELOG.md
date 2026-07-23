@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1
+
+- Rename the FakeGPS control feedback to identify X50 Navigation as the owner;
+  Gateway remains only the compatibility transport.
+
 ## 1.7.0
 
 - Trips from the real head unit (`HA/Relay`) and the directly connected AVD
