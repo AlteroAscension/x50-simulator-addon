@@ -26,7 +26,6 @@
         <button data-layer="line"><span>Линия</span></button>
         <button data-layer="both" class="active"><span>Всё</span></button>
       </div>
-      <button class="icon-button stale-toggle" id="stalePointsToggle" title="Показать устаревшие или не относящиеся к маршруту history-точки" aria-label="Показать устаревшие точки" disabled>◷</button>
       <button class="icon-button" id="fitRoute" title="Показать маршрут">⌖</button>
       <button class="icon-button trip-log-button" id="tripLogToggle" title="Журнал поездок" aria-label="Журнал поездок">≋</button>
       <button class="icon-button" id="fullscreenToggle" title="Полноэкранный режим" aria-label="Полноэкранный режим">⛶</button>
@@ -100,15 +99,10 @@
         <button data-mode="route"><span>➜</span><b>FakeGPS</b><small>Движение по маршруту</small></button>
       </div>
       <div class="point-legend">
-        <span><i class="exact-dot"></i>MapKit <b id="exactCount">0</b></span>
-        <span><i class="guidance-dot"></i>Guidance <b id="guidanceCount">0</b></span>
-        <span><i class="history-dot"></i>History <b id="historyCount">0</b></span>
-        <span class="stale-legend"><i class="stale-dot"></i>Старые <b id="staleHistoryCount">0</b></span>
+        <span><i class="exact-dot"></i>MapKit DrivingRoute <b id="exactCount">0</b></span>
       </div>
       <div class="point-refresh-actions">
-        <button class="source-refresh exact-refresh" id="reloadExact" title="Получить точную геометрию активного DrivingRoute из MapKit">↻ MapKit exact</button>
-        <button class="source-refresh" id="reloadGuidance" title="Заново прочитать актуальные guidance-точки из Навигатора">↻ Guidance</button>
-        <button class="source-refresh" id="reloadHistory" title="Заново прочитать актуальные history-точки из Навигатора">↻ History</button>
+        <button class="source-refresh exact-refresh" id="reloadExact" title="Получить свежую геометрию активного DrivingRoute из MapKit">↻ Обновить MapKit</button>
       </div>
       <div class="coordinate-row">
         <div><span>Выбранная точка</span><strong id="selectedCoordinate">Нажмите на карту</strong></div>

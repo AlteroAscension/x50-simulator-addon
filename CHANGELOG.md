@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0
+
+- Make live MapKit `DrivingRoute` the only route source.
+- Remove Guidance, History and stale-history controls from the simulator UI.
+- Reload only the staged `x50_navigation_route.json` snapshot.
+
 ## 1.7.1
 
 - Rename the FakeGPS control feedback to identify X50 Navigation as the owner;

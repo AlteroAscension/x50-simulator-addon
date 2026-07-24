@@ -1138,16 +1138,15 @@ class SimulationEngine:
         self.wake.set()
         return result, status
 
-    def reload_route(self, requested_source="all"):
-        if requested_source not in ("all", "exact", "guidance", "history"):
+    def reload_route(self, requested_source="mapkit"):
+        if requested_source != "mapkit":
             return {"ok": False, "error": "invalid_route_source"}, 400
         with self.lock:
             token = self.token
             base_url = self.gateway_url
-        # Root-side staging runs every two seconds. Waiting for one complete
-        # cycle makes the button read Navigator's current private files instead
-        # of immediately re-decoding a potentially older staged copy.
-        time.sleep(2.2)
+        # Root-side MapKit staging runs once per second. Wait for one complete
+        # cycle before asking Navigation to reload its public staged snapshot.
+        time.sleep(1.2)
         result, status = gateway_request("/api/fake_nav/reload", "POST", {}, token, base_url=base_url)
         self._next_route_poll = 0.0
         self.wake.set()
@@ -1288,7 +1287,7 @@ class SimulationEngine:
                 self.route_source = str(result.get("route_source", "unknown"))
                 self.exact_route_points = exact_points
                 self.display_route_points = exact_points or points
-                self.route_points = list(points) if self.route_source == "exact" else self._smooth_route(points)
+                self.route_points = list(points) if self.route_source in ("mapkit", "exact") else self._smooth_route(points)
                 self.raw_route_points = raw_points or list(points)
                 self.guidance_route_points = guidance_points or list(points)
                 self.history_route_points = history_points
@@ -1676,7 +1675,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.reply_json(payload, status)
         elif path == "/api/controller/reload-route":
             data = self.read_json()
-            payload, status = self.engine.reload_route(str(data.get("source", "all")))
+            payload, status = self.engine.reload_route(str(data.get("source", "mapkit")))
             self.reply_json(payload, status)
         elif path == "/api/controller/trips/finish":
             self.reply_json(self.engine.trip_store.finish("manual"))

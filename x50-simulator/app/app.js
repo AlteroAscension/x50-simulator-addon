@@ -15,9 +15,6 @@ const routeGlow = L.polyline([], {color:'#1676ff',weight:14,opacity:.16,lineCap:
 const exactRouteLine = L.polyline([], {color:'#39efa0',weight:4,opacity:.94,lineCap:'round'}).addTo(map);
 const rawRenderer = L.canvas({padding:.5});
 const exactPointLayer = L.layerGroup().addTo(map);
-const guidancePointLayer = L.layerGroup().addTo(map);
-const historyPointLayer = L.layerGroup().addTo(map);
-const staleHistoryPointLayer = L.layerGroup();
 const speedLimitLayer = L.layerGroup().addTo(map);
 const roadEventLayer = L.layerGroup().addTo(map);
 const tripRealTrackLayer = L.layerGroup().addTo(map);
@@ -26,7 +23,7 @@ const tripRouteLayer = L.layerGroup().addTo(map);
 const tripEventLayer = L.layerGroup().addTo(map);
 const segmentHighlight = L.polyline([], {color:'#ffbd4a',weight:10,opacity:.96,lineCap:'round',className:'segment-highlight'}).addTo(map);
 const segmentInspectMarker = L.circleMarker([0,0],{radius:6,weight:2,color:'#fff',fillColor:'#ffbd4a',fillOpacity:1,interactive:false});
-let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null,mapkitRevision=null,routeLayerMode='both',showStalePoints=false,stateBusy=false,routeBusy=false,toastTimer,lastShownError=null;
+let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null,mapkitRevision=null,routeLayerMode='both',stateBusy=false,routeBusy=false,toastTimer,lastShownError=null;
 let mapClickMode='gps',currentRoutePoints=[],currentMapkitData={},inspectedSegmentIndex=null,hasAutoFittedRoute=false,userAdjustedMap=false;
 let tripsBusy=false,selectedTripId=null,lastTripSignature='',selectedTripData=null,tripTrackMode='both',tripShowRoutes=true;
 const tripRouteColors=['#a977ff','#3bd6ff','#ff6fae','#ffe06b','#66e0bd','#ff916b','#79a7ff','#d9f06b'];
@@ -43,13 +40,11 @@ function setRouteLayer(mode){
   routeLayerMode=mode;
   const showLine=mode==='line'||mode==='both',showPoints=mode==='points'||mode==='both';
   for(const layer of [routeGlow,routeLine,exactRouteLine,speedLimitLayer])showLine?layer.addTo(map):layer.remove();
-  for(const layer of [exactPointLayer,guidancePointLayer,historyPointLayer])showPoints?layer.addTo(map):layer.remove();
-  showPoints&&showStalePoints?staleHistoryPointLayer.addTo(map):staleHistoryPointLayer.remove();
+  showPoints?exactPointLayer.addTo(map):exactPointLayer.remove();
   document.querySelectorAll('#routeLayers button').forEach(button=>button.classList.toggle('active',button.dataset.layer===mode));
   persist({routeLayer:mode});
 }
 
-function setStalePoints(show){showStalePoints=show;$('stalePointsToggle').classList.toggle('active',show);setRouteLayer(routeLayerMode);persist({showStalePoints:show})}
 function fillPointLayer(layer,points,style){layer.clearLayers();for(const p of points)L.circleMarker([p[0],p[1]],{renderer:rawRenderer,interactive:false,...style}).addTo(layer)}
 
 function mapkitPosition(points,position){
@@ -156,7 +151,7 @@ function updateState(next){state=next;
   const isHa=next.gateway_mode==='ha';
   const gwHost=isHa?'🌐 HA Queue':(next.gateway_url||'127.0.0.1:8080').replace(/^https?:\/\//,'');
   $('gatewayChip').querySelector('span').textContent=next.gateway_online?`GW (${gwHost})`:`GW off (${gwHost})`;
-  $('routeChip').classList.toggle('online',next.route_available);$('routeChip').querySelector('span').textContent=next.route_available?`${next.route_source==='exact'?'MapKit exact':'Маршрут'} ${(next.route_length_m/1000).toFixed(1)} км`:'Маршрут —';
+  $('routeChip').classList.toggle('online',next.route_available);$('routeChip').querySelector('span').textContent=next.route_available?`MapKit ${(next.route_length_m/1000).toFixed(1)} км`:'MapKit —';
   $('routeSummary').textContent=next.route_available?`${(next.route_progress_m/1000).toFixed(2)} / ${(next.route_length_m/1000).toFixed(1)} км`:'Ожидание захвата';
   $('routeProgressText').textContent=next.route_available?`${(next.route_progress_m/1000).toFixed(2)} / ${(next.route_length_m/1000).toFixed(1)} км`:'0 / 0 км';
   $('routeProgress').max=Math.max(1,Math.round(next.route_length_m));if(document.activeElement!==$('routeProgress'))$('routeProgress').value=Math.round(next.route_progress_m);
@@ -281,10 +276,10 @@ async function pollRoute(){
       if(signature!==routeRevision){
         routeRevision=signature;
         routeGlow.setLatLngs([]);routeLine.setLatLngs([]);exactRouteLine.setLatLngs([]);
-        exactPointLayer.clearLayers();guidancePointLayer.clearLayers();historyPointLayer.clearLayers();staleHistoryPointLayer.clearLayers();
+        exactPointLayer.clearLayers();
         speedLimitLayer.clearLayers();roadEventLayer.clearLayers();mapkitRevision=null;
         currentRoutePoints=[];currentMapkitData={};closeSegmentInspector();
-        $('exactCount').textContent='0';$('guidanceCount').textContent='0';$('historyCount').textContent='0';$('staleHistoryCount').textContent='0';
+        $('exactCount').textContent='0';
       }
       return;
     }
@@ -296,33 +291,25 @@ async function pollRoute(){
     routeRevision=signature;
     const latlngs=route.points.map(p=>[p[0],p[1]]),exactLatLngs=exact.map(p=>[p[0],p[1]]);
     routeGlow.setLatLngs(latlngs);routeLine.setLatLngs(latlngs);exactRouteLine.setLatLngs(exactLatLngs);
-    const guidance=route.guidance_points||route.points||[],history=route.history_points||route.raw_points||[],stale=route.stale_history_points||[];
     fillPointLayer(exactPointLayer,exact,{radius:2.6,weight:.8,color:'#e1fff1',fillColor:'#39efa0',fillOpacity:.82,opacity:.9});
-    fillPointLayer(guidancePointLayer,guidance,{radius:5.2,weight:1.6,color:'#dff8ff',fillColor:'#28cfff',fillOpacity:.88,opacity:.98});
-    fillPointLayer(historyPointLayer,history,{radius:4.5,weight:1.4,color:'#ffdc83',fillColor:'#ffad32',fillOpacity:.8,opacity:.94});
-    fillPointLayer(staleHistoryPointLayer,stale,{radius:4.2,weight:1.2,color:'#ff8795',fillColor:'#ff5268',fillOpacity:.38,opacity:.7,dashArray:'2 2'});
-    $('exactCount').textContent=exact.length;$('guidanceCount').textContent=guidance.length;$('historyCount').textContent=history.length;$('staleHistoryCount').textContent=stale.length;
-    document.querySelector('.stale-legend').classList.toggle('visible',!!stale.length);$('stalePointsToggle').disabled=!stale.length;$('stalePointsToggle').title=stale.length?`Устаревшие/вне маршрута history: ${stale.length}`:'Устаревших history-точек нет';
+    $('exactCount').textContent=exact.length;
     setRouteLayer(routeLayerMode);$('routeProgress').max=Math.max(1,Math.round(route.length_m));
     if(inspectedSegmentIndex!=null){if(inspectedSegmentIndex<currentRoutePoints.length-1)inspectSegment(inspectedSegmentIndex);else closeSegmentInspector()}
-    if(latlngs.length>1){if(!hasAutoFittedRoute){if(!userAdjustedMap)map.fitBounds((exactLatLngs.length>1?exactRouteLine:routeLine).getBounds(),{padding:[90,90]});hasAutoFittedRoute=true}const pointInfo=`MapKit ${exact.length}, guidance ${guidance.length}, history ${history.length}${stale.length?`, старых ${stale.length}`:''}`;toast(`${route.route_source==='exact'?'Точный MapKit-маршрут':'Маршрут'} ${(route.length_m/1000).toFixed(1)} км · ${pointInfo}`)}
+    if(latlngs.length>1){if(!hasAutoFittedRoute){if(!userAdjustedMap)map.fitBounds((exactLatLngs.length>1?exactRouteLine:routeLine).getBounds(),{padding:[90,90]});hasAutoFittedRoute=true}toast(`MapKit DrivingRoute ${(route.length_m/1000).toFixed(1)} км · ${exact.length} точек`)}
   }catch{}finally{routeBusy=false}
 }
 
 async function refreshRouteSources(source='all'){
-  const buttons=[$('reloadExact'),$('reloadGuidance'),$('reloadHistory'),$('reloadRoute')];
+  const buttons=[$('reloadExact'),$('reloadRoute')];
   buttons.forEach(button=>button.disabled=true);
   try{
-    toast(`Получаю свежий ${source==='exact'?'MapKit exact':source==='history'?'History':'Guidance'}…`);
-    const result=await request('/api/controller/reload-route',{method:'POST',body:JSON.stringify({source})});
+    toast('Получаю свежий MapKit DrivingRoute…');
+    const result=await request('/api/controller/reload-route',{method:'POST',body:JSON.stringify({source:'mapkit'})});
     routeRevision=null;
     await pollRoute();
     const route=result.route||{};
-    const guidance=route.guidance_points?.length??$('guidanceCount').textContent;
-    const history=route.history_points?.length??$('historyCount').textContent;
-    const stale=route.stale_history_points?.length??$('staleHistoryCount').textContent;
     const exact=route.exact_points?.length??$('exactCount').textContent;
-    toast(`Точки обновлены: MapKit ${exact}, Guidance ${guidance}, History ${history}, вне маршрута ${stale}`);
+    toast(`MapKit обновлён: ${exact} точек`);
   }catch(error){toast(error.message,true)}finally{buttons.forEach(button=>button.disabled=false)}
 }
 
@@ -346,10 +333,8 @@ $('mobileExpandToggle').addEventListener('click', () => {
 });
 $('routeProgress').addEventListener('input',()=>{$('routeProgressText').textContent=`${(number('routeProgress')/1000).toFixed(2)} / ${state?(state.route_length_m/1000).toFixed(1):0} км`});
 $('routeProgress').addEventListener('change',()=>control({route_progress_m:number('routeProgress')},false).catch(()=>{}));
-$('reloadExact').addEventListener('click',()=>refreshRouteSources('exact'));
-$('reloadGuidance').addEventListener('click',()=>refreshRouteSources('guidance'));
-$('reloadHistory').addEventListener('click',()=>refreshRouteSources('history'));
-$('reloadRoute').addEventListener('click',()=>refreshRouteSources('all'));
+$('reloadExact').addEventListener('click',()=>refreshRouteSources('mapkit'));
+$('reloadRoute').addEventListener('click',()=>refreshRouteSources('mapkit'));
 $('fitRoute').addEventListener('click',()=>{if(exactRouteLine.getLatLngs().length>1)map.fitBounds(exactRouteLine.getBounds(),{padding:[80,80]});else if(routeLine.getLatLngs().length>1)map.fitBounds(routeLine.getBounds(),{padding:[80,80]});else if(state?.last_sent)map.setView([state.last_sent.lat,state.last_sent.lon],15)});
 $('tripLogToggle').addEventListener('click',()=>{$('tripPanel').classList.add('open');pollTrips(true)});
 $('tripPanelClose').addEventListener('click',()=>$('tripPanel').classList.remove('open'));
@@ -361,7 +346,6 @@ $('finishTrip').addEventListener('click',async()=>{try{await request('/api/contr
 $('settingsToggle').addEventListener('click',()=>$('settingsPanel').classList.toggle('open'));
 $('settingsClose').addEventListener('click',()=>$('settingsPanel').classList.remove('open'));
 document.querySelectorAll('#routeLayers button').forEach(button=>button.addEventListener('click',()=>setRouteLayer(button.dataset.layer)));
-$('stalePointsToggle').addEventListener('click',()=>setStalePoints(!showStalePoints));
 document.querySelectorAll('#mapClickMode button').forEach(button=>button.addEventListener('click',()=>setMapClickMode(button.dataset.clickMode)));
 $('segmentInspectorClose').addEventListener('click',closeSegmentInspector);
 
@@ -376,4 +360,4 @@ function fullscreenChanged(){const active=!!(document.fullscreenElement||documen
 $('fullscreenToggle').addEventListener('click',toggleFullscreen);document.addEventListener('fullscreenchange',fullscreenChanged);document.addEventListener('webkitfullscreenchange',fullscreenChanged);window.addEventListener('resize',()=>setTimeout(()=>map.invalidateSize(),80));
 
 const preferences=saved();delete preferences.token;for(const [id,key] of [['vehicleScale','vehicleScale'],['odoScale','odoScale'],['gpsScale','gpsScale'],['gpsHz','gpsHz']])if(preferences[key]!=null)$(id).value=preferences[key];
-setStalePoints(!!preferences.showStalePoints);setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);setInterval(()=>pollTrips(false),5000);
+setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);setInterval(()=>pollTrips(false),5000);
