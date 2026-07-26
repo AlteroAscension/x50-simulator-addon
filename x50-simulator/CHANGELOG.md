@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0
+
+- Store X50 Navigation `0.7.0` persistent-calibration diagnostics in trip
+  journals for post-drive analysis.
+- Include active/candidate factors, confidence, MAD, evidence counters,
+  calibrated distance and systematic normal-correction bias.
+
 ## 1.8.0
 
 - Make live MapKit `DrivingRoute` the only route source.

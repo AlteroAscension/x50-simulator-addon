@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0
+
+- Preserve X50 Navigation persistent-calibration fields in every HA trip
+  sample and correction event.
+- Record active/candidate factors, confidence, MAD, accepted/rejected windows,
+  calibrated distance, trip count and systematic correction bias.
+
 ## 1.8.0
 
 - Make live MapKit `DrivingRoute` the only route source.
