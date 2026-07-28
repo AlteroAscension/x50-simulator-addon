@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from collections import deque
 import argparse
+import base64
+import gzip
 import hashlib
 import json
 import math
@@ -90,6 +92,70 @@ def finite_number(value, default=None):
         return number if math.isfinite(number) else default
     except (TypeError, ValueError):
         return default
+
+
+def decode_route_transport(attributes):
+    """Decode the retained HA route transport into a trip route snapshot."""
+    if not isinstance(attributes, dict):
+        return None
+    snapshot_id = str(attributes.get("snapshot_id") or "")
+    if not snapshot_id:
+        return None
+    if not attributes.get("available"):
+        observed_ms = int(finite_number(
+            attributes.get("published_at_ms"), time.time() * 1000))
+        return {"snapshot_id": snapshot_id, "available": False,
+                "device_kind": "head_unit", "observed_at_ms": observed_ms}
+    if attributes.get("codec") != "gzip+base64":
+        return None
+    encoded = attributes.get("payload_b64")
+    if not isinstance(encoded, str) or not encoded:
+        return None
+    try:
+        route = json.loads(gzip.decompress(base64.b64decode(encoded)).decode("utf-8"))
+    except (ValueError, TypeError, OSError):
+        return None
+    exact = route.get("exact_points") or route.get("points") or []
+    points = []
+    for item in exact:
+        if not isinstance(item, list) or len(item) < 2:
+            continue
+        lat, lon = finite_number(item[0]), finite_number(item[1])
+        if lat is not None and lon is not None and abs(lat) <= 90 and abs(lon) <= 180:
+            points.append([round(lat, 7), round(lon, 7)])
+    if len(points) < 2:
+        return None
+    mapkit = route.get("mapkit_route")
+    if not isinstance(mapkit, dict):
+        mapkit = {}
+    length_m = finite_number(route.get("length_m"))
+    if length_m is None or length_m <= 0:
+        length_m = sum(haversine_m(a, b) for a, b in zip(points, points[1:]))
+    observed_ms = int(finite_number(
+        attributes.get("published_at_ms"), time.time() * 1000))
+    captured_ms = int(finite_number(
+        mapkit.get("captured_at_ms"), attributes.get("captured_at_ms", 0)) or 0)
+    return {
+        "snapshot_id": snapshot_id,
+        "available": True,
+        "device_kind": "head_unit",
+        "route_id": str(route.get("exact_route_id") or attributes.get("route_id") or ""),
+        "route_source": str(route.get("route_source") or "mapkit"),
+        "route_generation": int(finite_number(route.get("route_generation"), 0) or 0),
+        "route_activation_count": int(finite_number(
+            route.get("route_activation_count"), 0) or 0),
+        "gateway_route_identity": str(route.get("route_identity") or ""),
+        "source_revision": str(route.get("source_revision") or ""),
+        "revision": route.get("revision"),
+        "activated_at_ms": int(finite_number(
+            route.get("route_activated_at_ms"), observed_ms) or observed_ms),
+        "captured_at_ms": captured_ms,
+        "observed_at_ms": observed_ms,
+        "length_m": round(length_m, 1),
+        "point_count": len(points),
+        "points": points,
+        "mapkit_route": mapkit,
+    }
 
 
 class TripLogStore:
@@ -209,6 +275,27 @@ class TripLogStore:
             if self.active:
                 self._activate_route(detached)
                 self._save_summary()
+
+    def clear_route(self, observed_ms=None):
+        with self.lock:
+            self.latest_route_snapshot = None
+            if not self.active or self.active_route_snapshot_id is None:
+                self.active_route_snapshot_id = None
+                return
+            switch_ms = int(finite_number(observed_ms, time.time() * 1000)
+                            or time.time() * 1000)
+            if self.last_route_switch_ms is not None:
+                switch_ms = max(switch_ms, self.last_route_switch_ms + 1)
+            previous_id = self.active_route_snapshot_id
+            self._append(self.active["id"], {
+                "kind": "route_switch", "time_ms": switch_ms,
+                "from_snapshot_id": previous_id, "to_snapshot_id": None,
+                "route_id": "", "route_source": "none",
+            })
+            self.active_route_snapshot_id = None
+            self.last_route_switch_ms = switch_ms
+            self.active["route_switches"] += 1
+            self._save_summary()
 
     def _activate_route(self, snapshot, forced_time_ms=None):
         snapshot_id = str(snapshot.get("snapshot_id", ""))
@@ -581,6 +668,10 @@ class TripLogRegistry:
         scoped["device_kind"] = kind
         self.stores[kind].observe_route(scoped)
 
+    def clear_route(self, device_kind, observed_ms=None):
+        kind = self.normalize_kind(device_kind)
+        self.stores[kind].clear_route(observed_ms)
+
     def finish(self, reason="manual"):
         finished = []
         for store in self.stores.values():
@@ -876,6 +967,8 @@ class SimulationEngine:
         self.gateway_mode = os.environ.get("X50_GATEWAY_MODE", "direct")
         self.ha_url = os.environ.get("HA_URL", "http://supervisor/core")
         self.ha_token = os.environ.get("SUPERVISOR_TOKEN", "")
+        self.ha_route_transport_id = ""
+        self.ha_route_snapshot = None
         self.settings_path = Path(os.environ.get(
             "X50_SETTINGS_PATH", "/data/x50-controller-settings.json"))
         self._load_settings()
@@ -1366,6 +1459,24 @@ class SimulationEngine:
         fresh = timestamp is not None and abs(time.time() * 1000 - timestamp) <= 20000
         return result, status, fresh
 
+    def _ha_route_transport(self, ha_url, ha_token):
+        state, status = ha_request(
+            "states/sensor.x50_navigation_route_transport", "GET",
+            ha_url=ha_url, ha_token=ha_token)
+        if status >= 300 or not isinstance(state, dict):
+            return None, status
+        attributes = state.get("attributes")
+        if not isinstance(attributes, dict):
+            return None, status
+        snapshot_id = str(attributes.get("snapshot_id") or state.get("state") or "")
+        if snapshot_id and snapshot_id == self.ha_route_transport_id:
+            return self.ha_route_snapshot, status
+        snapshot = decode_route_transport(attributes)
+        if snapshot is not None:
+            self.ha_route_transport_id = snapshot_id
+            self.ha_route_snapshot = snapshot
+        return snapshot, status
+
     def _poll_status(self):
         with self.lock:
             token = self.token
@@ -1375,6 +1486,7 @@ class SimulationEngine:
             ha_token = self.ha_token
         result, status = gateway_request("/api/fake_nav", token=token, base_url=base_url)
         ha_result, ha_status, ha_fresh = self._ha_trip_diagnostics(ha_url, ha_token)
+        ha_route, ha_route_status = self._ha_route_transport(ha_url, ha_token)
         direct_kind = TripLogRegistry.normalize_kind(
             result.get("device_kind", self.gateway_device_kind)
             if isinstance(result, dict) else self.gateway_device_kind)
@@ -1406,6 +1518,12 @@ class SimulationEngine:
                 "journal_source": "ha_relay",
             }
             self.trip_store.observe("head_unit", ha_result, real_context)
+            if ha_route_status < 300 and isinstance(ha_route, dict):
+                if ha_route.get("available"):
+                    self.trip_store.observe_route(ha_route, "head_unit")
+                else:
+                    self.trip_store.clear_route(
+                        "head_unit", ha_route.get("observed_at_ms"))
 
         if status < 300 and (direct_kind == "avd" or not ha_fresh):
             direct_context = self._trip_context()

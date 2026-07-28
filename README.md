@@ -1,10 +1,17 @@
 # X50 Telemetry — Home Assistant Add-on Repository
 
-![Add-on Version](https://img.shields.io/badge/Add--on-v1.9.0-blue)
+![Add-on Version](https://img.shields.io/badge/Add--on-v1.10.0-blue)
 ![HA Ingress](https://img.shields.io/badge/HA-Ingress%20Supported-brightgreen)
 
 Репозиторий официального дополнения **X50 Navigation Simulator** (версия
-**`1.9.0`**) для Home Assistant.
+**`1.10.0`**) для Home Assistant.
+
+Версия 1.10.0 получает полный MapKit-маршрут реального ГУ через retained
+сущность `sensor.x50_navigation_route_transport` и сохраняет его в истории
+поездки вместе с точным событием переключения. Для этого требуются Relay
+`2.15-mapkit-route-transport` и актуальный пакет
+`home-assistant/x50_telemetry.yaml` из основного репозитория. Маршрут AVD
+по-прежнему читается напрямую и никогда не прикрепляется к поездке реального ГУ.
 
 ## Установка дополнения в Home Assistant
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.0
+
+- Receive complete MapKit route snapshots from the real head unit through
+  Relay and a dedicated retained Home Assistant MQTT entity.
+- Decode gzip+base64 geometry and metadata inside the add-on and journal it
+  only in `head_unit` trips.
+- Record the exact activation and removal time for every transported route;
+  AVD route polling remains independent.
+
 ## 1.9.0
 
 - Preserve X50 Navigation persistent-calibration fields in every HA trip
