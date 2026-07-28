@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.1
+
+- Read full MapKit route snapshots from the existing
+  `sensor.x50_trip_diagnostics` navigation attributes.
+- Keep the dedicated retained route entity as an optional compatibility
+  fallback, not a required Home Assistant package update.
+- Strip the compressed transport envelope before writing one-second trip
+  samples.
+
 ## 1.10.0
 
 - Receive complete MapKit route snapshots from the real head unit through

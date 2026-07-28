@@ -158,6 +158,13 @@ def decode_route_transport(attributes):
     }
 
 
+def extract_embedded_route_transport(fake_nav):
+    """Remove the one-shot route payload from compact navigation diagnostics."""
+    result = dict(fake_nav or {})
+    transport = result.pop("route_transport", None)
+    return result, decode_route_transport(transport)
+
+
 class TripLogStore:
     """Persistent 1 Hz trip journal with explicit GPS correction events."""
 
@@ -969,6 +976,7 @@ class SimulationEngine:
         self.ha_token = os.environ.get("SUPERVISOR_TOKEN", "")
         self.ha_route_transport_id = ""
         self.ha_route_snapshot = None
+        self.ha_embedded_route_seen = False
         self.settings_path = Path(os.environ.get(
             "X50_SETTINGS_PATH", "/data/x50-controller-settings.json"))
         self._load_settings()
@@ -1447,7 +1455,8 @@ class SimulationEngine:
         ha_state, status = ha_request("states/sensor.x50_trip_diagnostics", "GET",
                                       ha_url=ha_url, ha_token=ha_token)
         attributes = ha_state.get("attributes", {}) if isinstance(ha_state, dict) else {}
-        result = dict(attributes.get("fake_nav") or {})
+        result, route_snapshot = extract_embedded_route_transport(
+            attributes.get("fake_nav"))
         if status < 300:
             result["ok"] = True
             if attributes.get("vehicle_speed_kmh") is not None:
@@ -1457,7 +1466,19 @@ class SimulationEngine:
             result["ha_sample_timestamp_ms"] = attributes.get("sample_timestamp_ms")
         timestamp = finite_number(attributes.get("sample_timestamp_ms"))
         fresh = timestamp is not None and abs(time.time() * 1000 - timestamp) <= 20000
-        return result, status, fresh
+        return result, status, fresh, route_snapshot
+
+    def _cache_ha_route_transport(self, attributes, fallback_id=""):
+        if not isinstance(attributes, dict):
+            return None
+        snapshot_id = str(attributes.get("snapshot_id") or fallback_id or "")
+        if snapshot_id and snapshot_id == self.ha_route_transport_id:
+            return self.ha_route_snapshot
+        snapshot = decode_route_transport(attributes)
+        if snapshot is not None:
+            self.ha_route_transport_id = snapshot_id
+            self.ha_route_snapshot = snapshot
+        return snapshot
 
     def _ha_route_transport(self, ha_url, ha_token):
         state, status = ha_request(
@@ -1468,14 +1489,8 @@ class SimulationEngine:
         attributes = state.get("attributes")
         if not isinstance(attributes, dict):
             return None, status
-        snapshot_id = str(attributes.get("snapshot_id") or state.get("state") or "")
-        if snapshot_id and snapshot_id == self.ha_route_transport_id:
-            return self.ha_route_snapshot, status
-        snapshot = decode_route_transport(attributes)
-        if snapshot is not None:
-            self.ha_route_transport_id = snapshot_id
-            self.ha_route_snapshot = snapshot
-        return snapshot, status
+        return self._cache_ha_route_transport(
+            attributes, state.get("state")), status
 
     def _poll_status(self):
         with self.lock:
@@ -1485,8 +1500,21 @@ class SimulationEngine:
             ha_url = self.ha_url
             ha_token = self.ha_token
         result, status = gateway_request("/api/fake_nav", token=token, base_url=base_url)
-        ha_result, ha_status, ha_fresh = self._ha_trip_diagnostics(ha_url, ha_token)
-        ha_route, ha_route_status = self._ha_route_transport(ha_url, ha_token)
+        ha_result, ha_status, ha_fresh, embedded_route = \
+            self._ha_trip_diagnostics(ha_url, ha_token)
+        if embedded_route is not None:
+            ha_route = embedded_route
+            self.ha_embedded_route_seen = True
+            self.ha_route_transport_id = str(
+                embedded_route.get("snapshot_id") or "")
+            self.ha_route_snapshot = embedded_route
+            ha_route_status = ha_status
+        elif not self.ha_embedded_route_seen:
+            ha_route, ha_route_status = self._ha_route_transport(ha_url, ha_token)
+        else:
+            # Once the authoritative embedded channel is observed, never let a
+            # stale optional retained entity roll the head-unit route backward.
+            ha_route, ha_route_status = None, 404
         direct_kind = TripLogRegistry.normalize_kind(
             result.get("device_kind", self.gateway_device_kind)
             if isinstance(result, dict) else self.gateway_device_kind)

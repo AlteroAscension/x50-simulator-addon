@@ -48,6 +48,18 @@ class RouteTransportTest(unittest.TestCase):
         self.assertEqual("POLICE",
                          snapshot["mapkit_route"]["events"][0]["tags"][0])
 
+    def test_extracts_route_from_existing_trip_diagnostics_channel(self):
+        fake_nav = {
+            "enabled": True,
+            "route_source": "mapkit",
+            "route_transport": self.transport(),
+        }
+        diagnostics, snapshot = server.extract_embedded_route_transport(fake_nav)
+        self.assertNotIn("route_transport", diagnostics)
+        self.assertTrue(diagnostics["enabled"])
+        self.assertEqual("identity-1:7:4", snapshot["snapshot_id"])
+        self.assertEqual(2, snapshot["point_count"])
+
     def test_unavailable_transport_clears_without_geometry(self):
         snapshot = server.decode_route_transport(self.transport(False))
         self.assertEqual({

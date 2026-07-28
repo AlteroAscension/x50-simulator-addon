@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.1
+
+- Move real-head-unit MapKit route intake into the add-on's existing trip
+  diagnostics channel.
+- Remove the mandatory new MQTT entity/package update from the deployment
+  path; the retained entity remains a backward-compatible fallback.
+
 ## 1.10.0
 
 - Receive complete MapKit route snapshots from the real head unit through
