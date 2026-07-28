@@ -19,9 +19,9 @@ package для этого не требуются; нужен Relay `2.15.1-addo
 для ветки `1.x` выпускаются критические исправления и изменения совместимости.
 Новый эксплуатационный интерфейс и HA-native integration развиваются отдельно:
 
-- [Belgee X50 HA Integration](../belgee-x50-ha-integration/README.md);
-- [Belgee X50 Control Center](../belgee-x50-control-center/README.md);
-- [план переноса данных](../belgee-x50-control-center/MIGRATION.md).
+- [Belgee X50 HA Integration](https://github.com/AlteroAscension/belgee-x50-ha-integration);
+- [Belgee X50 Control Center](https://github.com/AlteroAscension/belgee-x50-control-center);
+- [план переноса данных](https://github.com/AlteroAscension/belgee-x50-control-center/blob/main/MIGRATION.md).
 
 До завершения параллельной проверки этот add-on не считается устаревшим и
 остаётся рабочим способом симуляции/анализа. Новые control-center функции сюда
