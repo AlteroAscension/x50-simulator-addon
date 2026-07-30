@@ -3,6 +3,8 @@
 ![Add-on Version](https://img.shields.io/badge/Add--on-v1.10.1-blue)
 ![HA Ingress](https://img.shields.io/badge/HA-Ingress%20Supported-brightgreen)
 
+Open source under the [MIT License](LICENSE).
+
 Репозиторий официального дополнения **X50 Navigation Simulator** (версия
 **`1.10.1`**) для Home Assistant.
 
