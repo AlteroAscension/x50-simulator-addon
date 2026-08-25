@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.2
+
+- Separate archived-trip overlays from the direct live MapKit layer.
+- Hide the live layer when selecting a trip and provide an explicit `Live
+  MapKit` switch to show it again.
+- Do not expose a cached AVD route as live when its direct Gateway source is
+  offline.
+
 ## 1.10.1
 
 - Read full MapKit route snapshots from the existing

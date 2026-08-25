@@ -946,6 +946,10 @@ class SimulationEngine:
         self.route_changed_at = 0
         self.fake_nav = {}
         self.gateway_online = False
+        # This is deliberately separate from gateway_online: in HA mode the
+        # latter reflects HA telemetry, while the live map is still fetched
+        # from the configured direct Gateway/AVD endpoint.
+        self.route_gateway_online = False
         self.last_error = None
         self.last_sent = None
         self.last_raw = None
@@ -1151,7 +1155,12 @@ class SimulationEngine:
 
     def route_state(self):
         with self.lock:
-            return {"ok": True, "available": bool(self.route_points),
+            # Geometry is intentionally kept in memory so a reconnect can resume
+            # the AVD simulation.  It must not, however, be presented as a live
+            # MapKit route after its direct Gateway source has gone offline.
+            return {"ok": True, "available": bool(self.route_points) and self.route_gateway_online,
+                    "cached_available": bool(self.route_points),
+                    "source_online": self.route_gateway_online,
                     "revision": self.route_revision, "length_m": round(self.route_length_m, 1),
                     "progress_m": round(self.route_progress_m, 1),
                     "points": self.display_route_points or self.route_points,
@@ -1341,6 +1350,7 @@ class SimulationEngine:
         snapshot = None
         with self.lock:
             self.gateway_online = status < 500
+            self.route_gateway_online = status < 500
             if status >= 300:
                 return
             self.gateway_device_kind = TripLogRegistry.normalize_kind(

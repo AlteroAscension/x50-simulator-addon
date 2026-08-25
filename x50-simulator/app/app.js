@@ -25,7 +25,7 @@ const segmentHighlight = L.polyline([], {color:'#ffbd4a',weight:10,opacity:.96,l
 const segmentInspectMarker = L.circleMarker([0,0],{radius:6,weight:2,color:'#fff',fillColor:'#ffbd4a',fillOpacity:1,interactive:false});
 let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null,mapkitRevision=null,routeLayerMode='both',stateBusy=false,routeBusy=false,toastTimer,lastShownError=null;
 let mapClickMode='gps',currentRoutePoints=[],currentMapkitData={},inspectedSegmentIndex=null,hasAutoFittedRoute=false,userAdjustedMap=false;
-let tripsBusy=false,selectedTripId=null,lastTripSignature='',selectedTripData=null,tripTrackMode='both',tripShowRoutes=true;
+let tripsBusy=false,selectedTripId=null,lastTripSignature='',selectedTripData=null,tripTrackMode='both',tripShowRoutes=true,liveRouteVisible=true;
 const tripRouteColors=['#a977ff','#3bd6ff','#ff6fae','#ffe06b','#66e0bd','#ff916b','#79a7ff','#d9f06b'];
 
 function toast(message, error=false){const el=$('toast');el.textContent=message;el.style.borderColor=error?'rgba(255,98,119,.45)':'';el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2400)}
@@ -39,10 +39,18 @@ function persist(extra={}){const previous=saved();delete previous.token;localSto
 function setRouteLayer(mode){
   routeLayerMode=mode;
   const showLine=mode==='line'||mode==='both',showPoints=mode==='points'||mode==='both';
-  for(const layer of [routeGlow,routeLine,exactRouteLine,speedLimitLayer])showLine?layer.addTo(map):layer.remove();
-  showPoints?exactPointLayer.addTo(map):exactPointLayer.remove();
+  for(const layer of [routeGlow,routeLine,exactRouteLine,speedLimitLayer])showLine&&liveRouteVisible?layer.addTo(map):layer.remove();
+  showPoints&&liveRouteVisible?exactPointLayer.addTo(map):exactPointLayer.remove();
+  liveRouteVisible?roadEventLayer.addTo(map):roadEventLayer.remove();
   document.querySelectorAll('#routeLayers button').forEach(button=>button.classList.toggle('active',button.dataset.layer===mode));
   persist({routeLayer:mode});
+}
+function setLiveRouteVisible(visible){
+  liveRouteVisible=!!visible;
+  setRouteLayer(routeLayerMode);
+  if(!liveRouteVisible){segmentHighlight.remove();segmentInspectMarker.remove();}
+  const button=$('liveRouteToggle');
+  if(button){button.classList.toggle('active',liveRouteVisible);button.setAttribute('aria-pressed',String(liveRouteVisible));button.textContent=liveRouteVisible?'Live MapKit':'Live MapKit скрыт';}
 }
 
 function fillPointLayer(layer,points,style){layer.clearLayers();for(const p of points)L.circleMarker([p[0],p[1]],{renderer:rawRenderer,interactive:false,...style}).addTo(layer)}
@@ -261,7 +269,7 @@ function renderTripDetail(data){
   const device=tripDevice(trip);
   $('tripSummary').innerHTML=`<span><small>Устройство</small><b>${device.label}</b></span><span><small>Длительность</small><b>${tripDuration(trip.duration_s)}</b></span><span><small>Одометр</small><b>${metric(trip.distance_odometer_m,1,' м')}</b></span><span><small>Интеграл скорости</small><b>${metric(trip.distance_integrated_m,1,' м')}</b></span><span><small>Коррекции Σ</small><b>${metric(trip.correction_total_m,1,' м')}</b></span><span><small>Макс. вперёд</small><b>${metric(trip.max_forward_correction_m,1,' м')}</b></span><span><small>Разрывы GPS</small><b>${trip.gps_outages||0}</b></span><span><small>Маршруты</small><b>${routes.length} / ${switches.length} вкл.</b></span>`;
   $('tripEvents').innerHTML=events.length?events.slice().reverse().map(event=>{const reacquired=event.event==='gps_reacquired',distance=reacquired?(event.distance_by_odometer_m??event.distance_by_speed_integral_m):event.odometer_delta_m,shift=reacquired?event.gps_catch_up_m:event.correction_m;return `<tr><td>${new Date(event.time_ms).toLocaleTimeString('ru-RU')}</td><td><b>${reacquired?'GPS вернулся':'Коррекция'}</b><small>${event.progress_source||''}</small></td><td>${reacquired?metric(event.outage_duration_s,1,' с'):'—'}</td><td>${metric(event.vehicle_speed_kmh,1,' км/ч')}</td><td>${metric(distance,1,' м')}</td><td class="${Number(shift)>=0?'forward':'backward'}">${Number(shift)>=0?'+':''}${metric(shift,1,' м')}</td></tr>`}).join(''):'<tr><td colspan="6">Коррекций и разрывов GPS пока нет</td></tr>';
-  selectedTripData=data;renderTripRouteTimeline(data);drawSelectedTrip(false);
+  selectedTripData=data;setLiveRouteVisible(false);renderTripRouteTimeline(data);drawSelectedTrip(false);
   requestAnimationFrame(()=>drawTripChart(samples,events));
 }
 async function loadTrip(id){selectedTripId=id;try{const data=await request(`/api/controller/trips/${encodeURIComponent(id)}`);renderTripDetail(data);document.querySelectorAll('.trip-list-item').forEach(button=>button.classList.toggle('active',button.dataset.tripId===id))}catch(error){toast(error.message,true)}}
@@ -338,10 +346,11 @@ $('reloadRoute').addEventListener('click',()=>refreshRouteSources('mapkit'));
 $('fitRoute').addEventListener('click',()=>{if(exactRouteLine.getLatLngs().length>1)map.fitBounds(exactRouteLine.getBounds(),{padding:[80,80]});else if(routeLine.getLatLngs().length>1)map.fitBounds(routeLine.getBounds(),{padding:[80,80]});else if(state?.last_sent)map.setView([state.last_sent.lat,state.last_sent.lon],15)});
 $('tripLogToggle').addEventListener('click',()=>{$('tripPanel').classList.add('open');pollTrips(true)});
 $('tripPanelClose').addEventListener('click',()=>$('tripPanel').classList.remove('open'));
-$('showTripOnMap').addEventListener('click',()=>drawSelectedTrip(true));
-$('clearTripFromMap').addEventListener('click',clearTripTrack);
+$('showTripOnMap').addEventListener('click',()=>{setLiveRouteVisible(false);drawSelectedTrip(true)});
+$('clearTripFromMap').addEventListener('click',()=>{clearTripTrack();setLiveRouteVisible(true)});
 document.querySelectorAll('#tripTrackMode button').forEach(button=>button.addEventListener('click',()=>{tripTrackMode=button.dataset.tripTrack;document.querySelectorAll('#tripTrackMode button').forEach(item=>item.classList.toggle('active',item===button));drawSelectedTrip(false)}));
 $('tripRouteToggle').addEventListener('click',()=>{tripShowRoutes=!tripShowRoutes;$('tripRouteToggle').classList.toggle('active',tripShowRoutes);$('tripRouteToggle').setAttribute('aria-pressed',String(tripShowRoutes));drawSelectedTrip(false)});
+$('liveRouteToggle').addEventListener('click',()=>setLiveRouteVisible(!liveRouteVisible));
 $('finishTrip').addEventListener('click',async()=>{try{await request('/api/controller/trips/finish',{method:'POST',body:'{}'});selectedTripId=null;await pollTrips(true);toast('Поездка завершена')}catch(error){toast(error.message,true)}});
 $('settingsToggle').addEventListener('click',()=>$('settingsPanel').classList.toggle('open'));
 $('settingsClose').addEventListener('click',()=>$('settingsPanel').classList.remove('open'));
