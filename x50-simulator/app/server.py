@@ -1462,21 +1462,26 @@ class SimulationEngine:
         self.trace.clear()
 
     def _ha_trip_diagnostics(self, ha_url, ha_token):
-        ha_state, status = ha_request("states/sensor.x50_trip_diagnostics", "GET",
-                                      ha_url=ha_url, ha_token=ha_token)
-        attributes = ha_state.get("attributes", {}) if isinstance(ha_state, dict) else {}
-        result, route_snapshot = extract_embedded_route_transport(
-            attributes.get("fake_nav"))
-        if status < 300:
-            result["ok"] = True
-            if attributes.get("vehicle_speed_kmh") is not None:
-                result["vehicle_speed_kmh"] = attributes.get("vehicle_speed_kmh")
-            if attributes.get("odometer_km") is not None:
-                result["odometer_km"] = attributes.get("odometer_km")
-            result["ha_sample_timestamp_ms"] = attributes.get("sample_timestamp_ms")
-        timestamp = finite_number(attributes.get("sample_timestamp_ms"))
-        fresh = timestamp is not None and abs(time.time() * 1000 - timestamp) <= 20000
-        return result, status, fresh, route_snapshot
+        # Prefer fresh native data; the old MQTT/YAML entity stays a fallback.
+        for entity_id in ("sensor.belgee_x50_trip_diagnostics",
+                          "sensor.x50_trip_diagnostics"):
+            ha_state, status = ha_request("states/" + entity_id, "GET",
+                                          ha_url=ha_url, ha_token=ha_token)
+            attributes = ha_state.get("attributes", {}) if isinstance(ha_state, dict) else {}
+            result, route_snapshot = extract_embedded_route_transport(
+                attributes.get("fake_nav"))
+            if status < 300:
+                result["ok"] = True
+                if attributes.get("vehicle_speed_kmh") is not None:
+                    result["vehicle_speed_kmh"] = attributes.get("vehicle_speed_kmh")
+                if attributes.get("odometer_km") is not None:
+                    result["odometer_km"] = attributes.get("odometer_km")
+                result["ha_sample_timestamp_ms"] = attributes.get("sample_timestamp_ms")
+            timestamp = finite_number(attributes.get("sample_timestamp_ms"))
+            fresh = timestamp is not None and abs(time.time() * 1000 - timestamp) <= 20000
+            if fresh or entity_id == "sensor.x50_trip_diagnostics":
+                return result, status, fresh, route_snapshot
+        return {}, 404, False, None
 
     def _cache_ha_route_transport(self, attributes, fallback_id=""):
         if not isinstance(attributes, dict):

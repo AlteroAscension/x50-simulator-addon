@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.3
+
+- Prefer fresh native Belgee X50 integration diagnostics for the live map,
+  trip journal, speed and odometer; retain the legacy sensor as fallback.
+
 ## 1.10.2
 
 - Separate archived-trip overlays from the direct live MapKit layer.

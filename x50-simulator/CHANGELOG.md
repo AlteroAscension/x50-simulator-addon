@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.3
+
+- prefer fresh `sensor.belgee_x50_trip_diagnostics` data from the native
+  Belgee X50 integration, while retaining the legacy YAML sensor as fallback.
+
 ## 1.10.2
 
 - Separate archived-trip overlays from the direct live MapKit layer.
