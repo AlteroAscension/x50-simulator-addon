@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.4
+
+- Correct the native integration compatibility entity ID used by Home
+  Assistant's entity registry.
+
 ## 1.10.3
 
 - prefer fresh `sensor.belgee_x50_trip_diagnostics` data from the native

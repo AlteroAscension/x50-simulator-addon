@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.4
+
+- Correct the native integration compatibility entity ID used by Home
+  Assistant's entity registry.
+
 ## 1.10.3
 
 - Prefer fresh native Belgee X50 integration diagnostics for the live map,

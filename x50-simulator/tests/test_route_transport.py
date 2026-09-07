@@ -3,7 +3,9 @@ import gzip
 import json
 import sys
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -59,6 +61,27 @@ class RouteTransportTest(unittest.TestCase):
         self.assertTrue(diagnostics["enabled"])
         self.assertEqual("identity-1:7:4", snapshot["snapshot_id"])
         self.assertEqual(2, snapshot["point_count"])
+
+    def test_prefers_registered_native_compatibility_entity(self):
+        engine = object.__new__(server.SimulationEngine)
+        now_ms = int(time.time() * 1000)
+        native = {
+            "attributes": {
+                "sample_timestamp_ms": now_ms,
+                "vehicle_speed_kmh": 12.0,
+                "odometer_km": 100.0,
+                "fake_nav": {"enabled": True},
+            }
+        }
+        with patch.object(server, "ha_request", return_value=(native, 200)) as request:
+            result, status, fresh, snapshot = engine._ha_trip_diagnostics("", "")
+        self.assertEqual("states/sensor.belgee_x50_simulator_diagnostics",
+                         request.call_args.args[0])
+        self.assertEqual(200, status)
+        self.assertTrue(fresh)
+        self.assertTrue(result["ok"])
+        self.assertEqual(12.0, result["vehicle_speed_kmh"])
+        self.assertIsNone(snapshot)
 
     def test_unavailable_transport_clears_without_geometry(self):
         snapshot = server.decode_route_transport(self.transport(False))

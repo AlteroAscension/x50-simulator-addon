@@ -1463,7 +1463,8 @@ class SimulationEngine:
 
     def _ha_trip_diagnostics(self, ha_url, ha_token):
         # Prefer fresh native data; the old MQTT/YAML entity stays a fallback.
-        for entity_id in ("sensor.belgee_x50_trip_diagnostics",
+        for entity_id in ("sensor.belgee_x50_simulator_diagnostics",
+                          "sensor.belgee_x50_trip_diagnostics",
                           "sensor.x50_trip_diagnostics"):
             ha_state, status = ha_request("states/" + entity_id, "GET",
                                           ha_url=ha_url, ha_token=ha_token)
