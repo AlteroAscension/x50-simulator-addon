@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.5
+
+- In HA / Internet mode, read live MapKit geometry through the native
+  integration transport instead of sending a protected Gateway reload request
+  to Home Assistant (HTTP 401).
+
 ## 1.10.4
 
 - Correct the native integration compatibility entity ID used by Home

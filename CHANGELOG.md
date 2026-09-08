@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.5
+
+- Repair live MapKit reload and route display in HA / Internet mode.
+
 ## 1.10.4
 
 - Correct the native integration compatibility entity ID used by Home

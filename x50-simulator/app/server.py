@@ -165,6 +165,42 @@ def extract_embedded_route_transport(fake_nav):
     return result, decode_route_transport(transport)
 
 
+def route_transport_response(snapshot):
+    """Present an HA route transport snapshot in the legacy route API shape."""
+    if not isinstance(snapshot, dict):
+        return {"available": False, "route_source": "ha"}
+    snapshot_id = str(snapshot.get("snapshot_id") or "")
+    available = bool(snapshot.get("available"))
+    if not available:
+        return {
+            "available": False,
+            "route_source": "ha",
+            "source_revision": snapshot_id or "ha-unavailable",
+        }
+    points = list(snapshot.get("points") or [])
+    route_id = str(snapshot.get("route_id") or snapshot_id)
+    mapkit_route = dict(snapshot.get("mapkit_route") or {})
+    return {
+        "available": len(points) >= 2,
+        "device_kind": "head_unit",
+        "points": points,
+        "raw_points": points,
+        "guidance_points": points,
+        "exact_points": points,
+        "route_source": "mapkit",
+        "exact_fresh": True,
+        "exact_available": True,
+        "exact_route_id": route_id,
+        "mapkit_route": mapkit_route,
+        "revision": snapshot_id,
+        "source_revision": snapshot_id,
+        "route_generation": int(mapkit_route.get("route_generation", 0) or 0),
+        "route_activation_count": 1,
+        "route_activated_at_ms": int(snapshot.get("observed_at_ms", 0) or 0),
+        "route_identity": snapshot_id or route_id,
+    }
+
+
 class TripLogStore:
     """Persistent 1 Hz trip journal with explicit GPS correction events."""
 
@@ -1278,10 +1314,18 @@ class SimulationEngine:
         with self.lock:
             token = self.token
             base_url = self.gateway_url
+            mode = self.gateway_mode
         # Root-side MapKit staging runs once per second. Wait for one complete
         # cycle before asking Navigation to reload its public staged snapshot.
         time.sleep(1.2)
-        result, status = gateway_request("/api/fake_nav/reload", "POST", {}, token, base_url=base_url)
+        if mode == "ha":
+            # HA transport is read-only: Relay already publishes each fresh
+            # Navigation snapshot. Do not turn the HA API URL into a bogus
+            # Gateway request (which used to return HTTP 401 here).
+            self._poll_status()
+            result, status = {"ok": True, "source": "ha_transport"}, 200
+        else:
+            result, status = gateway_request("/api/fake_nav/reload", "POST", {}, token, base_url=base_url)
         self._next_route_poll = 0.0
         self.wake.set()
         if status < 300:
@@ -1346,7 +1390,18 @@ class SimulationEngine:
         with self.lock:
             token = self.token
             base_url = self.gateway_url
-        result, status = gateway_request("/api/fake_nav/route", token=token, base_url=base_url)
+            mode = self.gateway_mode
+            ha_url = self.ha_url
+            ha_token = self.ha_token
+            cached_ha_route = self.ha_route_snapshot
+        if mode == "ha":
+            snapshot = cached_ha_route
+            status = 200 if snapshot is not None else 404
+            if snapshot is None:
+                snapshot, status = self._ha_route_transport(ha_url, ha_token)
+            result = route_transport_response(snapshot)
+        else:
+            result, status = gateway_request("/api/fake_nav/route", token=token, base_url=base_url)
         snapshot = None
         with self.lock:
             self.gateway_online = status < 500

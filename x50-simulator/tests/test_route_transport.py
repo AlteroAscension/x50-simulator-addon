@@ -62,6 +62,20 @@ class RouteTransportTest(unittest.TestCase):
         self.assertEqual("identity-1:7:4", snapshot["snapshot_id"])
         self.assertEqual(2, snapshot["point_count"])
 
+    def test_transport_response_is_usable_by_simulator_route_poller(self):
+        response = server.route_transport_response(
+            server.decode_route_transport(self.transport()))
+        self.assertTrue(response["available"])
+        self.assertEqual("head_unit", response["device_kind"])
+        self.assertEqual(2, len(response["exact_points"]))
+        self.assertEqual("identity-1:7:4", response["source_revision"])
+
+    def test_transport_response_keeps_unavailable_route_unavailable(self):
+        response = server.route_transport_response(server.decode_route_transport(
+            self.transport(False)))
+        self.assertFalse(response["available"])
+        self.assertEqual("ha", response["route_source"])
+
     def test_prefers_registered_native_compatibility_entity(self):
         engine = object.__new__(server.SimulationEngine)
         now_ms = int(time.time() * 1000)
