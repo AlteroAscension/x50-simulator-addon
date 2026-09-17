@@ -50,7 +50,7 @@ function setLiveRouteVisible(visible){
   setRouteLayer(routeLayerMode);
   if(!liveRouteVisible){segmentHighlight.remove();segmentInspectMarker.remove();}
   const button=$('liveRouteToggle');
-  if(button){button.classList.toggle('active',liveRouteVisible);button.setAttribute('aria-pressed',String(liveRouteVisible));button.textContent=liveRouteVisible?'Live MapKit':'Live MapKit скрыт';}
+  if(button){button.classList.toggle('active',liveRouteVisible);button.setAttribute('aria-pressed',String(liveRouteVisible));button.textContent=liveRouteVisible?'Текущий маршрут':'Текущий маршрут скрыт';}
 }
 
 function fillPointLayer(layer,points,style){layer.clearLayers();for(const p of points)L.circleMarker([p[0],p[1]],{renderer:rawRenderer,interactive:false,...style}).addTo(layer)}

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.6
+
+- Accept and journal complete 2GIS route snapshots from Navigation alongside
+  MapKit routes, preserving the real `route_source` in both the live layer and
+  every saved head-unit trip.
+
 ## 1.10.5
 
 - Repair live MapKit reload and route display in HA / Internet mode.

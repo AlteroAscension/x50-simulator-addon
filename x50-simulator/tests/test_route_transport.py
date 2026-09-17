@@ -15,11 +15,11 @@ import server
 
 
 class RouteTransportTest(unittest.TestCase):
-    def transport(self, available=True):
+    def transport(self, available=True, source="mapkit"):
         route = {
             "available": True,
             "exact_route_id": "route-1",
-            "route_source": "mapkit",
+            "route_source": source,
             "route_generation": 4,
             "route_activation_count": 7,
             "route_activated_at_ms": 1700000000100,
@@ -69,6 +69,29 @@ class RouteTransportTest(unittest.TestCase):
         self.assertEqual("head_unit", response["device_kind"])
         self.assertEqual(2, len(response["exact_points"]))
         self.assertEqual("identity-1:7:4", response["source_revision"])
+
+    def test_2gis_source_is_preserved_in_live_route_and_trip_history(self):
+        with tempfile.TemporaryDirectory() as root:
+            registry = server.TripLogRegistry(root=root)
+            transport = self.transport(source="2gis")
+            payload = json.loads(gzip.decompress(
+                base64.b64decode(transport["payload_b64"])).decode())
+            payload.pop("mapkit_route")
+            payload["exact_captured_ms"] = 1700000000123
+            transport["payload_b64"] = base64.b64encode(gzip.compress(
+                json.dumps(payload, separators=(",", ":")).encode())).decode()
+            snapshot = server.decode_route_transport(transport)
+            response = server.route_transport_response(snapshot)
+            self.assertEqual("2gis", response["route_source"])
+            self.assertEqual(1700000000123, snapshot["captured_at_ms"])
+            registry.observe_route(snapshot, "head_unit")
+            registry.observe("head_unit", {
+                "ok": True, "vehicle_speed_kmh": 12.0,
+                "odometer_km": 100.0, "route_source": "2gis",
+            }, {"journal_source": "ha_relay"})
+            detail, status = registry.detail(registry.list()["trips"][0]["id"])
+            self.assertEqual(200, status)
+            self.assertEqual("2gis", detail["routes"][0]["route_source"])
 
     def test_transport_response_keeps_unavailable_route_unavailable(self):
         response = server.route_transport_response(server.decode_route_transport(

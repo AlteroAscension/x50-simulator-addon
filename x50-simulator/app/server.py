@@ -134,7 +134,10 @@ def decode_route_transport(attributes):
     observed_ms = int(finite_number(
         attributes.get("published_at_ms"), time.time() * 1000))
     captured_ms = int(finite_number(
-        mapkit.get("captured_at_ms"), attributes.get("captured_at_ms", 0)) or 0)
+        route.get("captured_at_ms"), finite_number(
+            route.get("exact_captured_ms"), finite_number(
+                mapkit.get("captured_at_ms"),
+                attributes.get("captured_at_ms", 0)))) or 0)
     return {
         "snapshot_id": snapshot_id,
         "available": True,
@@ -179,6 +182,7 @@ def route_transport_response(snapshot):
         }
     points = list(snapshot.get("points") or [])
     route_id = str(snapshot.get("route_id") or snapshot_id)
+    route_source = str(snapshot.get("route_source") or "mapkit")
     mapkit_route = dict(snapshot.get("mapkit_route") or {})
     return {
         "available": len(points) >= 2,
@@ -187,15 +191,15 @@ def route_transport_response(snapshot):
         "raw_points": points,
         "guidance_points": points,
         "exact_points": points,
-        "route_source": "mapkit",
+        "route_source": route_source,
         "exact_fresh": True,
         "exact_available": True,
         "exact_route_id": route_id,
         "mapkit_route": mapkit_route,
         "revision": snapshot_id,
         "source_revision": snapshot_id,
-        "route_generation": int(mapkit_route.get("route_generation", 0) or 0),
-        "route_activation_count": 1,
+        "route_generation": int(snapshot.get("route_generation", 0) or 0),
+        "route_activation_count": int(snapshot.get("route_activation_count", 1) or 1),
         "route_activated_at_ms": int(snapshot.get("observed_at_ms", 0) or 0),
         "route_identity": snapshot_id or route_id,
     }
@@ -1477,7 +1481,12 @@ class SimulationEngine:
                 self.route_source = str(result.get("route_source", "unknown"))
                 self.exact_route_points = exact_points
                 self.display_route_points = exact_points or points
-                self.route_points = list(points) if self.route_source in ("mapkit", "exact") else self._smooth_route(points)
+                # Both MapKit and 2GIS snapshots are already ordered road
+                # geometry. Smoothing 2GIS here would alter the route that was
+                # actually selected on the head unit.
+                self.route_points = (list(points) if self.route_source in
+                                     ("mapkit", "2gis", "exact")
+                                     else self._smooth_route(points))
                 self.raw_route_points = raw_points or list(points)
                 self.guidance_route_points = guidance_points or list(points)
                 self.history_route_points = history_points
