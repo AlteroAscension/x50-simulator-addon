@@ -1,12 +1,15 @@
 # X50 Telemetry — Home Assistant Add-on Repository
 
-![Add-on Version](https://img.shields.io/badge/Add--on-v1.10.1-blue)
+![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.0-blue)
 ![HA Ingress](https://img.shields.io/badge/HA-Ingress%20Supported-brightgreen)
 
 Open source under the [MIT License](LICENSE).
 
 Репозиторий официального дополнения **X50 Navigation Simulator** (версия
-**`1.10.1`**) для Home Assistant.
+**`1.11.0`**) для Home Assistant.
+
+В 1.11.0 добавлена поддержка визуализации и пост-калибровки виртуальных траекторий
+по датчикам руля (CAN ID 0x0E0), скорости и одометра.
 
 Версия 1.10.1 получает полный MapKit-маршрут реального ГУ прямо из уже
 существующего `sensor.x50_trip_diagnostics` и сохраняет его в истории поездки

@@ -28,6 +28,7 @@
       </div>
       <button class="icon-button" id="fitRoute" title="Показать маршрут">⌖</button>
       <button class="icon-button trip-log-button" id="tripLogToggle" title="Журнал поездок" aria-label="Журнал поездок">≋</button>
+      <button class="icon-button trajectory-button" id="trajectoryToggle" title="Виртуальные траектории (руль)" aria-label="Виртуальные траектории (руль)">⤹</button>
       <button class="icon-button" id="fullscreenToggle" title="Полноэкранный режим" aria-label="Полноэкранный режим">⛶</button>
       <button class="icon-button" id="settingsToggle" title="Настройки">⚙</button>
     </div>
@@ -86,6 +87,61 @@
           <table class="trip-events">
             <thead><tr><th>Время</th><th>Событие</th><th>Без GPS</th><th>Скорость</th><th>Путь</th><th>Сдвиг</th></tr></thead>
             <tbody id="tripEvents"><tr><td colspan="6">Нет выбранной поездки</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <aside class="trajectory-panel glass" id="trajectoryPanel" aria-label="Виртуальные траектории">
+    <div class="trip-panel-heading">
+      <div><span class="eyebrow" style="color:#d946ef;">Одометрия и руль</span><h2>Виртуальные траектории</h2></div>
+      <div class="trip-panel-actions">
+        <input type="file" id="trajectoryFileInput" accept=".json" style="display:none">
+        <button class="small-button" id="uploadTrajectoryBtn" title="Загрузить JSON-файл траектории">Загрузить JSON</button>
+        <button class="small-button" id="fetchNavTrajectory" title="Получить свежую траекторию с модуля навигации">Запросить с ГУ</button>
+        <button class="icon-button" id="trajectoryPanelClose" title="Закрыть">×</button>
+      </div>
+    </div>
+    <p class="trip-hint">Траектория строится по кинематической модели велосипеда (L = 2.60 м, G = 15.5) в относительных метрах (x, y). Вы можете наложить её на карту, выбрать начальную точку и скорректировать угол азимута.</p>
+    <div class="trip-layout">
+      <div class="trip-list" id="trajectoryList"><div class="trip-empty">Файлы траекторий не найдены</div></div>
+      <div class="trip-detail" id="trajectoryDetail">
+        <div class="trip-summary" id="trajectorySummary"><span>Выберите траекторию</span></div>
+        <div class="trajectory-control-bar">
+          <div class="control-row">
+            <label class="control-field">
+              <span>Привязка начальной точки</span>
+              <div class="control-buttons">
+                <button type="button" class="small-button active" id="anchorModeRoute">По маршруту</button>
+                <button type="button" class="small-button" id="anchorModeClick">Клик по карте</button>
+              </div>
+            </label>
+            <label class="control-field">
+              <span>Азимут направления: <b id="trajectoryBearingVal">0.0°</b></span>
+              <input type="range" id="trajectoryBearingSlider" min="0" max="360" step="0.5" value="0">
+            </label>
+            <label class="control-field">
+              <span>Масштаб руля (G): <b id="trajectoryScaleVal">1.00×</b></span>
+              <input type="range" id="trajectoryScaleSlider" min="0.5" max="1.5" step="0.05" value="1.0">
+            </label>
+          </div>
+          <div class="action-row">
+            <button class="small-button primary" id="showTrajectoryOnMap" disabled>Показать на карте</button>
+            <button class="small-button subtle" id="clearTrajectoryFromMap" disabled>Скрыть</button>
+            <button class="small-button danger" id="deleteTrajectoryBtn" disabled>Удалить</button>
+            <span class="trajectory-stats" id="trajectoryStats">Траектория не выбрана</span>
+          </div>
+        </div>
+        <div class="trip-map-legend">
+          <span><i class="traj-track" style="background:#d946ef;display:inline-block;width:15px;height:4px;border-radius:4px;"></i>траектория руля</span>
+          <span><i class="traj-anchor" style="background:#38e28b;display:inline-block;width:8px;height:8px;border-radius:50%;"></i>точка старта</span>
+          <b id="trajectoryAnchorCoords">—</b>
+        </div>
+        <div class="trip-events-wrap" style="max-height:200px;margin-top:10px;">
+          <table class="trip-events">
+            <thead><tr><th>#</th><th>Время</th><th>Δt (c)</th><th>X (м)</th><th>Y (м)</th><th>Курс (°)</th><th>Скорость</th><th>Руль (°)</th><th>Дистанция</th></tr></thead>
+            <tbody id="trajectoryPointsTable"><tr><td colspan="9">Выберите траекторию для просмотра точек</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -192,6 +248,7 @@
     <div class="metric"><span>Передача GPS</span><strong><b id="effectiveHz">0.0</b> Гц</strong><small id="latency">— мс</small></div>
     <div class="metric"><span>Скорость по точкам</span><strong><b id="measuredSpeed">0.0</b> км/ч</strong><small id="speedError">Δ 0.0</small></div>
     <div class="metric"><span>Одометр</span><strong><b id="odoValue">0.000</b> км</strong><small id="odoBias">×1.025</small></div>
+    <div class="metric"><span>Угол руля (CAN)</span><strong id="steeringMetricValue"><b id="steeringAngleVal">—</b></strong><small id="steeringFreshVal">нет данных</small></div>
     <div class="metric route-metric"><span>Маршрут</span><strong id="routeSummary">Ожидание захвата</strong><small id="fakeMode">Fake: выкл.</small></div>
     <div class="metric"><span>Пакеты</span><strong><b id="sentCount">0</b> успешно</strong><small><b id="failedCount">0</b> ошибок</small></div>
   </section>

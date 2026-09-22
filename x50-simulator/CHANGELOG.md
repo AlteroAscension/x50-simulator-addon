@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.11.0
+
+- Added Virtual Trajectory Engine support: persistent storage, API endpoints (/api/controller/trajectories/*), and dynamic Leaflet visualization in Electric Magenta (#d946ef).
+- Interactive calibration overlay controls: initial bearing (theta_0) rotation slider and steering ratio scale multiplier slider with live flat-earth projection onto map.
+- Live CAN ID 0x0E0 steering wheel angle (deg) and rotation rate (deg/s) metrics display in simulator telemetry bar.
+- Trajectory file upload, export, deletion, and direct fetch from Head Unit navigation endpoints.
+
+## 1.10.6
+
+- Preserve complete 2GIS route snapshots in live route transport and trip history alongside MapKit.
+
 ## 1.10.5
 
 - In HA / Internet mode, read live MapKit geometry through the native

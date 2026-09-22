@@ -205,6 +205,122 @@ def route_transport_response(snapshot):
     }
 
 
+class TrajectoryStore:
+    """Persistent storage for virtual dead-reckoning trajectories (steering wheel + speed)."""
+
+    def __init__(self, root=None):
+        requested = Path(root or os.environ.get("X50_TRAJECTORY_DIR", "/data/x50-trajectories"))
+        try:
+            requested.mkdir(parents=True, exist_ok=True)
+            self.root = requested
+        except OSError:
+            self.root = ROOT / ".x50-trajectories"
+            self.root.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.RLock()
+
+    def list(self):
+        with self.lock:
+            items = []
+            for path in self.root.glob("*.json"):
+                if path.name.endswith(".tmp.json"):
+                    continue
+                try:
+                    stat = path.stat()
+                    with path.open("r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    items.append({
+                        "id": data.get("trajectory_id") or path.stem.replace("trajectory-", ""),
+                        "filename": path.name,
+                        "started_at_ms": data.get("started_at_ms"),
+                        "ended_at_ms": data.get("ended_at_ms"),
+                        "duration_s": data.get("duration_s"),
+                        "distance_m": data.get("distance_m", 0.0),
+                        "point_count": data.get("point_count", len(data.get("points", []))),
+                        "has_anchor": bool(data.get("anchor", {}).get("has_anchor")),
+                        "anchor": data.get("anchor"),
+                        "vehicle_params": data.get("vehicle_params"),
+                        "size_bytes": stat.st_size,
+                        "modified_ms": int(stat.st_mtime * 1000),
+                    })
+                except Exception as e:
+                    try:
+                        stat = path.stat()
+                        items.append({
+                            "id": path.stem.replace("trajectory-", ""),
+                            "filename": path.name,
+                            "error": str(e),
+                            "size_bytes": stat.st_size,
+                            "modified_ms": int(stat.st_mtime * 1000),
+                        })
+                    except OSError:
+                        pass
+            items.sort(key=lambda x: x.get("modified_ms", 0), reverse=True)
+            return {"ok": True, "trajectories": items}
+
+    def detail(self, trajectory_id):
+        with self.lock:
+            clean_id = str(trajectory_id).replace("trajectory-", "").replace(".json", "")
+            candidates = [
+                self.root / f"trajectory-{clean_id}.json",
+                self.root / f"{clean_id}.json",
+                self.root / f"{trajectory_id}"
+            ]
+            target = None
+            for c in candidates:
+                if c.is_file():
+                    target = c
+                    break
+            if not target:
+                return {"ok": False, "error": "not_found", "detail": f"Trajectory {trajectory_id} not found"}, 404
+            try:
+                with target.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return {"ok": True, "trajectory": data}, 200
+            except Exception as error:
+                return {"ok": False, "error": "read_error", "detail": str(error)}, 500
+
+    def save(self, payload):
+        if not isinstance(payload, dict) or ("points" not in payload and "trajectories" not in payload):
+            return {"ok": False, "error": "invalid_payload", "detail": "Missing 'points' array"}, 400
+        with self.lock:
+            traj_id = payload.get("trajectory_id") or ("traj_" + time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6])
+            payload["trajectory_id"] = traj_id
+            target = self.root / f"trajectory-{traj_id}.json"
+            tmp = self.root / f"trajectory-{traj_id}.tmp.json"
+            try:
+                with tmp.open("w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+                tmp.replace(target)
+                return {"ok": True, "id": traj_id, "filename": target.name, "point_count": len(payload.get("points", []))}, 200
+            except Exception as error:
+                return {"ok": False, "error": "save_error", "detail": str(error)}, 500
+
+    def delete(self, trajectory_id):
+        if not trajectory_id:
+            return {"ok": False, "error": "missing_id"}, 400
+        with self.lock:
+            clean_id = str(trajectory_id).replace("trajectory-", "").replace(".json", "")
+            for path in [self.root / f"trajectory-{clean_id}.json", self.root / f"{clean_id}.json", self.root / str(trajectory_id)]:
+                if path.is_file():
+                    try:
+                        path.unlink()
+                        return {"ok": True, "id": clean_id, "deleted": True}, 200
+                    except Exception as error:
+                        return {"ok": False, "error": "delete_failed", "detail": str(error)}, 500
+            return {"ok": False, "error": "not_found"}, 404
+
+    def fetch(self, url):
+        try:
+            req = Request(url, headers={"X-X50-Client": "simulator-addon"}, method="GET")
+            with urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            if not isinstance(data, dict) or not data.get("points"):
+                return {"ok": False, "error": "invalid_remote_data", "detail": "No points received"}, 400
+            return self.save(data)
+        except Exception as error:
+            return {"ok": False, "error": "fetch_failed", "detail": str(error)}, 502
+
+
 class TripLogStore:
     """Persistent 1 Hz trip journal with explicit GPS correction events."""
 
@@ -1027,6 +1143,7 @@ class SimulationEngine:
         self.force_route_anchor_pending = False
         self.route_hook = LiveRouteHook(adb, device, os.environ.get("X50_ROUTE_AGENT"))
         self.trip_store = TripLogRegistry()
+        self.trajectory_store = TrajectoryStore()
         self._last_integrate = time.monotonic()
         self._next_send = self._last_integrate
         self._next_route_poll = 0.0
@@ -1907,6 +2024,12 @@ class Handler(SimpleHTTPRequestHandler):
             trip_id = path.rsplit("/", 1)[-1]
             payload, status = self.engine.trip_store.detail(trip_id)
             self.reply_json(payload, status)
+        elif path == "/api/controller/trajectories":
+            self.reply_json(self.engine.trajectory_store.list())
+        elif path.startswith("/api/controller/trajectories/"):
+            traj_id = path.rsplit("/", 1)[-1]
+            payload, status = self.engine.trajectory_store.detail(traj_id)
+            self.reply_json(payload, status)
         elif path.startswith("/api/"):
             self.proxy()
         else:
@@ -1929,6 +2052,17 @@ class Handler(SimpleHTTPRequestHandler):
             self.reply_json(payload, status)
         elif path == "/api/controller/trips/finish":
             self.reply_json(self.engine.trip_store.finish("manual"))
+        elif path == "/api/controller/trajectories/upload":
+            payload, status = self.engine.trajectory_store.save(self.read_json())
+            self.reply_json(payload, status)
+        elif path == "/api/controller/trajectories/delete":
+            payload, status = self.engine.trajectory_store.delete(self.read_json().get("id"))
+            self.reply_json(payload, status)
+        elif path == "/api/controller/trajectories/fetch":
+            data = self.read_json()
+            url = data.get("url") or (self.engine.gateway_url.replace(":8080", ":8088") + "/api/trajectory/current")
+            payload, status = self.engine.trajectory_store.fetch(url)
+            self.reply_json(payload, status)
         elif path == "/api/location":
             data = self.read_json()
             data["emulator_native"] = True

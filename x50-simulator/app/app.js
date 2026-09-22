@@ -21,11 +21,14 @@ const tripRealTrackLayer = L.layerGroup().addTo(map);
 const tripFakeTrackLayer = L.layerGroup().addTo(map);
 const tripRouteLayer = L.layerGroup().addTo(map);
 const tripEventLayer = L.layerGroup().addTo(map);
+const trajectoryLayer = L.layerGroup().addTo(map);
+const trajectoryAnchorMarker = L.circleMarker([0,0],{radius:7,weight:3,color:'#fff',fillColor:'#38e28b',fillOpacity:1,interactive:false});
 const segmentHighlight = L.polyline([], {color:'#ffbd4a',weight:10,opacity:.96,lineCap:'round',className:'segment-highlight'}).addTo(map);
 const segmentInspectMarker = L.circleMarker([0,0],{radius:6,weight:2,color:'#fff',fillColor:'#ffbd4a',fillOpacity:1,interactive:false});
 let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null,mapkitRevision=null,routeLayerMode='both',stateBusy=false,routeBusy=false,toastTimer,lastShownError=null;
 let mapClickMode='gps',currentRoutePoints=[],currentMapkitData={},inspectedSegmentIndex=null,hasAutoFittedRoute=false,userAdjustedMap=false;
 let tripsBusy=false,selectedTripId=null,lastTripSignature='',selectedTripData=null,tripTrackMode='both',tripShowRoutes=true,liveRouteVisible=true;
+let trajectoriesBusy=false,selectedTrajectoryId=null,lastTrajectorySignature='',selectedTrajectoryData=null,trajectoryAnchorMode='route',trajectoryBearing=0.0,trajectorySteerScale=1.0;
 const tripRouteColors=['#a977ff','#3bd6ff','#ff6fae','#ffe06b','#66e0bd','#ff916b','#79a7ff','#d9f06b'];
 
 function toast(message, error=false){const el=$('toast');el.textContent=message;el.style.borderColor=error?'rgba(255,98,119,.45)':'';el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2400)}
@@ -164,6 +167,19 @@ function updateState(next){state=next;
   $('routeProgressText').textContent=next.route_available?`${(next.route_progress_m/1000).toFixed(2)} / ${(next.route_length_m/1000).toFixed(1)} км`:'0 / 0 км';
   $('routeProgress').max=Math.max(1,Math.round(next.route_length_m));if(document.activeElement!==$('routeProgress'))$('routeProgress').value=Math.round(next.route_progress_m);
   const fake=next.fake_nav||{};$('gatewayFake').checked=!!fake.enabled;$('fakeMode').textContent=`Gateway Fake: ${fake.enabled?(fake.mode||'вкл.'):'выкл.'}`;
+  if($('steeringAngleVal')){
+    if(fake.steering_angle_deg!=null&&Number.isFinite(Number(fake.steering_angle_deg))){
+      const angle=Number(fake.steering_angle_deg);
+      const arrow=angle>1.0?`◀ +${angle.toFixed(1)}°`:(angle<-1.0?`${angle.toFixed(1)}° ▶`:`0.0°`);
+      $('steeringAngleVal').textContent=arrow;
+      $('steeringFreshVal').textContent=fake.steering_fresh?'CAN свежие':'CAN устарели';
+      if($('steeringMetricValue'))$('steeringMetricValue').style.color=fake.steering_fresh?'#d946ef':'var(--muted)';
+    }else{
+      $('steeringAngleVal').textContent='—';
+      $('steeringFreshVal').textContent='нет данных';
+      if($('steeringMetricValue'))$('steeringMetricValue').style.color='var(--text)';
+    }
+  }
   document.querySelectorAll('#gpsMode button').forEach(button=>button.classList.toggle('active',button.dataset.mode===next.gps_mode));
   $('selectedCoordinate').textContent=formatCoord(next.selected);
   selectedMarker=setMarker(selectedMarker,next.selected,'selected');rawMarker=setMarker(rawMarker,next.last_raw,'raw');sentMarker=setMarker(sentMarker,next.last_sent,'sent');
@@ -274,6 +290,168 @@ function renderTripDetail(data){
 }
 async function loadTrip(id){selectedTripId=id;try{const data=await request(`/api/controller/trips/${encodeURIComponent(id)}`);renderTripDetail(data);document.querySelectorAll('.trip-list-item').forEach(button=>button.classList.toggle('active',button.dataset.tripId===id))}catch(error){toast(error.message,true)}}
 async function pollTrips(force=false){if(tripsBusy||(!$('tripPanel').classList.contains('open')&&!force))return;tripsBusy=true;try{const payload=await request('/api/controller/trips'),signature=JSON.stringify((payload.trips||[]).map(t=>[t.id,t.ended_ms,t.samples,t.correction_events,t.gps_outages]));if(force||signature!==lastTripSignature){lastTripSignature=signature;renderTripList(payload);if(selectedTripId)await loadTrip(selectedTripId)}}catch(error){if(force)toast(error.message,true)}finally{tripsBusy=false}}
+
+function projectTrajectoryPoints(points, anchorLat, anchorLon, initialBearingDeg, steerScale=1.0){
+  if(!points||!points.length||!Number.isFinite(anchorLat)||!Number.isFinite(anchorLon))return [];
+  const betaRad=(initialBearingDeg*Math.PI)/180.0;
+  const latRad=(anchorLat*Math.PI)/180.0;
+  const mPerLat=111132.954-559.822*Math.cos(2*latRad);
+  const mPerLon=111412.84*Math.cos(latRad);
+  const cosB=Math.cos(betaRad),sinB=Math.sin(betaRad);
+  return points.map((pt,idx)=>{
+    const x=Number(pt.x_m)||0;
+    const y=(Number(pt.y_m)||0)*steerScale;
+    const north=x*cosB+y*sinB;
+    const east=x*sinB-y*cosB;
+    const lat=anchorLat+north/mPerLat;
+    const lon=anchorLon+east/mPerLon;
+    return {lat,lon,x,y,pt,idx};
+  });
+}
+
+function getTrajectoryAnchor(){
+  if(trajectoryAnchorMode==='click'&&state?.selected){
+    return [state.selected.lat,state.selected.lon,trajectoryBearing];
+  }
+  if(selectedTrajectoryData?.trajectory?.anchor?.has_anchor){
+    const a=selectedTrajectoryData.trajectory.anchor;
+    return [Number(a.start_latitude),Number(a.start_longitude),Number(a.start_bearing_deg)||trajectoryBearing];
+  }
+  if(currentRoutePoints.length>0){
+    const p=currentRoutePoints[0];
+    let b=trajectoryBearing;
+    if(currentRoutePoints.length>1){
+      const p1=currentRoutePoints[1];
+      const dLon=(p1[1]-p[1])*Math.PI/180;
+      const lat1=p[0]*Math.PI/180,lat2=p1[0]*Math.PI/180;
+      const y=Math.sin(dLon)*Math.cos(lat2);
+      const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);
+      b=(Math.atan2(y,x)*180/Math.PI+360)%360;
+    }
+    return [p[0],p[1],b];
+  }
+  if(state?.last_sent){
+    return [state.last_sent.lat,state.last_sent.lon,trajectoryBearing];
+  }
+  return [55.751244,37.618423,trajectoryBearing];
+}
+
+function drawSelectedTrajectory(fit=false){
+  trajectoryLayer.clearLayers();
+  if(!selectedTrajectoryData?.trajectory?.points?.length){
+    $('showTrajectoryOnMap').disabled=true;
+    $('clearTrajectoryFromMap').disabled=true;
+    $('deleteTrajectoryBtn').disabled=!selectedTrajectoryId;
+    return;
+  }
+  const traj=selectedTrajectoryData.trajectory;
+  const pts=traj.points||[];
+  const [anchorLat,anchorLon,calcBearing]=getTrajectoryAnchor();
+  const bearingToUse=$('trajectoryBearingSlider')?Number($('trajectoryBearingSlider').value):calcBearing;
+  const scaleToUse=$('trajectoryScaleSlider')?Number($('trajectoryScaleSlider').value):1.0;
+
+  $('trajectoryAnchorCoords').textContent=`Старт: ${anchorLat.toFixed(5)}, ${anchorLon.toFixed(5)} · ${bearingToUse.toFixed(1)}°`;
+
+  const projected=projectTrajectoryPoints(pts,anchorLat,anchorLon,bearingToUse,scaleToUse);
+  if(!projected.length)return;
+
+  const latlngs=projected.map(p=>[p.lat,p.lon]);
+  L.polyline(latlngs,{color:'#d946ef',weight:5,opacity:.95,lineCap:'round',lineJoin:'round',dashArray:'6 6'}).bindTooltip(`Траектория (руль): ${pts.length} точек · ${(Number(traj.distance_m)||0).toFixed(1)} м`).addTo(trajectoryLayer);
+
+  trajectoryAnchorMarker.setLatLng([anchorLat,anchorLon]).bindTooltip(`Точка старта траектории`).addTo(trajectoryLayer);
+
+  for(let i=0;i<projected.length;i+=Math.max(1,Math.floor(projected.length/25))){
+    const p=projected[i];
+    const pt=p.pt;
+    const steer=Number(pt.steer_deg)||0;
+    const steerText=steer>0?`◀ +${steer.toFixed(1)}°`:(steer<0?`${steer.toFixed(1)}° ▶`:`0.0°`);
+    L.circleMarker([p.lat,p.lon],{radius:4,weight:1.5,color:'#fff',fillColor:'#d946ef',fillOpacity:.9}).bindTooltip(`#${i} · ${(Number(pt.speed_kmh)||0).toFixed(1)} км/ч · руль ${steerText}<br>x: ${(p.x).toFixed(1)} м, y: ${(p.y).toFixed(1)} м · курс: ${(Number(pt.heading_deg)||0).toFixed(1)}°`).addTo(trajectoryLayer);
+  }
+
+  $('showTrajectoryOnMap').disabled=false;
+  $('clearTrajectoryFromMap').disabled=false;
+  $('deleteTrajectoryBtn').disabled=false;
+
+  if(fit&&latlngs.length>1){
+    map.fitBounds(L.latLngBounds(latlngs),{padding:[70,70]});
+    $('trajectoryPanel').classList.remove('open');
+  }
+}
+
+function clearTrajectoryFromMap(){
+  trajectoryLayer.clearLayers();
+  $('clearTrajectoryFromMap').disabled=true;
+  $('trajectoryAnchorCoords').textContent='Траектория скрыта';
+}
+
+function renderTrajectoryList(payload){
+  const trajectories=payload.trajectories||[];
+  if(!trajectories.length){
+    $('trajectoryList').innerHTML='<div class="trip-empty">Файлы траекторий не найдены</div>';
+    $('trajectorySummary').innerHTML='<span>Нет траекторий</span>';
+    $('trajectoryPointsTable').innerHTML='<tr><td colspan="9">Файлы траекторий отсутствуют</td></tr>';
+    selectedTrajectoryId=null;selectedTrajectoryData=null;
+    $('showTrajectoryOnMap').disabled=true;
+    $('clearTrajectoryFromMap').disabled=true;
+    $('deleteTrajectoryBtn').disabled=true;
+    return;
+  }
+  $('trajectoryList').innerHTML=trajectories.map(t=>{
+    const hasA=t.has_anchor?'<em style="color:#38e28b;font-style:normal;font-size:8px;">маршрут</em>':'';
+    return `<button class="trip-list-item ${t.id===selectedTrajectoryId?'active':''}" data-traj-id="${t.id}"><span><b>${t.started_at_ms?tripDate(t.started_at_ms):t.id}</b>${hasA}</span><small>${metric(t.distance_m,1,' м')} · ${t.point_count||0} точек</small><small>файл: ${t.filename||t.id} (${(t.size_bytes/1024).toFixed(1)} КБ)</small></button>`;
+  }).join('');
+  document.querySelectorAll('#trajectoryList .trip-list-item').forEach(btn=>btn.addEventListener('click',()=>loadTrajectory(btn.dataset.trajId)));
+  if(!selectedTrajectoryId&&trajectories[0])loadTrajectory(trajectories[0].id);
+}
+
+function renderTrajectoryDetail(data){
+  selectedTrajectoryData=data;
+  const traj=data.trajectory||{};
+  const pts=traj.points||[];
+  const vp=traj.vehicle_params||{};
+  const anchor=traj.anchor||{};
+  $('trajectorySummary').innerHTML=`<span><small>ID</small><b>${String(traj.trajectory_id||'').slice(0,14)}</b></span><span><small>Дистанция</small><b>${metric(traj.distance_m,1,' м')}</b></span><span><small>Точек</small><b>${pts.length}</b></span><span><small>Длительность</small><b>${metric(traj.duration_s,1,' с')}</b></span><span><small>База L</small><b>${vp.wheelbase_m||2.6} м</b></span><span><small>Передаточное G</small><b>${vp.steering_ratio||15.5}</b></span>`;
+  if(anchor.has_anchor&&anchor.start_bearing_deg!=null){
+    $('trajectoryBearingSlider').value=Math.round(Number(anchor.start_bearing_deg)*2)/2;
+    $('trajectoryBearingVal').textContent=`${Number(anchor.start_bearing_deg).toFixed(1)}°`;
+  }
+  $('trajectoryStats').textContent=`${pts.length} точек · ${(Number(traj.distance_m)||0).toFixed(1)} м`;
+
+  const rows=pts.slice(0,100).map((pt,idx)=>{
+    const timeStr=pt.t_ms?new Date(pt.t_ms).toLocaleTimeString('ru-RU'):'—';
+    const steer=Number(pt.steer_deg)||0;
+    const steerCls=steer>1?'forward':(steer<-1?'backward':'');
+    const steerTxt=steer>0?`+${steer.toFixed(1)}`:`${steer.toFixed(1)}`;
+    return `<tr><td>${idx+1}</td><td>${timeStr}</td><td>${Number(pt.dt_s||0).toFixed(2)}</td><td>${Number(pt.x_m||0).toFixed(2)}</td><td>${Number(pt.y_m||0).toFixed(2)}</td><td>${Number(pt.heading_deg||0).toFixed(1)}°</td><td>${Number(pt.speed_kmh||0).toFixed(1)}</td><td class="${steerCls}">${steerTxt}</td><td>${Number(pt.dist_m||0).toFixed(1)} м</td></tr>`;
+  }).join('');
+  $('trajectoryPointsTable').innerHTML=rows||'<tr><td colspan="9">В файле нет точек</td></tr>';
+  drawSelectedTrajectory(false);
+}
+
+async function loadTrajectory(id){
+  selectedTrajectoryId=id;
+  try{
+    const data=await request(`/api/controller/trajectories/${encodeURIComponent(id)}`);
+    renderTrajectoryDetail(data);
+    document.querySelectorAll('#trajectoryList .trip-list-item').forEach(btn=>btn.classList.toggle('active',btn.dataset.trajId===id));
+  }catch(err){toast(err.message,true)}
+}
+
+async function pollTrajectories(force=false){
+  if(trajectoriesBusy||(!$('trajectoryPanel').classList.contains('open')&&!force))return;
+  trajectoriesBusy=true;
+  try{
+    const payload=await request('/api/controller/trajectories');
+    const sig=JSON.stringify((payload.trajectories||[]).map(t=>[t.id,t.point_count,t.size_bytes,t.modified_ms]));
+    if(force||sig!==lastTrajectorySignature){
+      lastTrajectorySignature=sig;
+      renderTrajectoryList(payload);
+      if(selectedTrajectoryId)await loadTrajectory(selectedTrajectoryId);
+    }
+  }catch(err){if(force)toast(err.message,true)}
+  finally{trajectoriesBusy=false}
+}
+
 async function pollRoute(){
   if(routeBusy)return;
   routeBusy=true;
@@ -368,5 +546,80 @@ async function toggleFullscreen(){
 function fullscreenChanged(){const active=!!(document.fullscreenElement||document.webkitFullscreenElement);$('fullscreenToggle').textContent=active?'↙':'⛶';$('fullscreenToggle').title=active?'Выйти из полноэкранного режима':'Полноэкранный режим';setTimeout(()=>map.invalidateSize(),120)}
 $('fullscreenToggle').addEventListener('click',toggleFullscreen);document.addEventListener('fullscreenchange',fullscreenChanged);document.addEventListener('webkitfullscreenchange',fullscreenChanged);window.addEventListener('resize',()=>setTimeout(()=>map.invalidateSize(),80));
 
+$('trajectoryToggle').addEventListener('click',()=>{
+  $('trajectoryPanel').classList.add('open');
+  pollTrajectories(true);
+});
+$('trajectoryPanelClose').addEventListener('click',()=>$('trajectoryPanel').classList.remove('open'));
+$('uploadTrajectoryBtn').addEventListener('click',()=>$('trajectoryFileInput').click());
+$('trajectoryFileInput').addEventListener('change',event=>{
+  const file=event.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    try{
+      const json=JSON.parse(e.target.result);
+      const res=await request('/api/controller/trajectories/upload',{method:'POST',body:JSON.stringify(json)});
+      toast(`Траектория загружена: ${res.id}`);
+      await pollTrajectories(true);
+      if(res.id)await loadTrajectory(res.id);
+    }catch(err){toast(`Ошибка JSON: ${err.message}`,true)}
+  };
+  reader.readAsText(file);
+  event.target.value='';
+});
+$('fetchNavTrajectory').addEventListener('click',async()=>{
+  try{
+    toast('Запрашиваю траекторию с ГУ…');
+    const gwUrl=$('gatewayUrl').value||'http://127.0.0.1:8080';
+    const navUrl=gwUrl.replace(':8080',':8088')+'/api/trajectory/current';
+    const res=await request('/api/controller/trajectories/fetch',{method:'POST',body:JSON.stringify({url:navUrl})});
+    toast(`Траектория получена: ${res.id} (${res.point_count} точек)`);
+    await pollTrajectories(true);
+    if(res.id)await loadTrajectory(res.id);
+  }catch(err){toast(`Не удалось получить с ГУ: ${err.message}`,true)}
+});
+$('deleteTrajectoryBtn').addEventListener('click',async()=>{
+  if(!selectedTrajectoryId)return;
+  if(!confirm(`Удалить файл траектории ${selectedTrajectoryId}?`))return;
+  try{
+    await request('/api/controller/trajectories/delete',{method:'POST',body:JSON.stringify({id:selectedTrajectoryId})});
+    toast('Траектория удалена');
+    clearTrajectoryFromMap();
+    selectedTrajectoryId=null;selectedTrajectoryData=null;
+    await pollTrajectories(true);
+  }catch(err){toast(err.message,true)}
+});
+$('anchorModeRoute').addEventListener('click',()=>{
+  trajectoryAnchorMode='route';
+  $('anchorModeRoute').classList.add('active');
+  $('anchorModeClick').classList.remove('active');
+  drawSelectedTrajectory(false);
+});
+$('anchorModeClick').addEventListener('click',()=>{
+  trajectoryAnchorMode='click';
+  $('anchorModeClick').classList.add('active');
+  $('anchorModeRoute').classList.remove('active');
+  toast('Кликните по карте для выбора точки старта траектории');
+  drawSelectedTrajectory(false);
+});
+$('trajectoryBearingSlider').addEventListener('input',()=>{
+  const val=Number($('trajectoryBearingSlider').value);
+  trajectoryBearing=val;
+  $('trajectoryBearingVal').textContent=`${val.toFixed(1)}°`;
+  drawSelectedTrajectory(false);
+});
+$('trajectoryScaleSlider').addEventListener('input',()=>{
+  const val=Number($('trajectoryScaleSlider').value);
+  trajectorySteerScale=val;
+  $('trajectoryScaleVal').textContent=`${val.toFixed(2)}×`;
+  drawSelectedTrajectory(false);
+});
+$('showTrajectoryOnMap').addEventListener('click',()=>{
+  drawSelectedTrajectory(true);
+});
+$('clearTrajectoryFromMap').addEventListener('click',()=>{
+  clearTrajectoryFromMap();
+});
+
 const preferences=saved();delete preferences.token;for(const [id,key] of [['vehicleScale','vehicleScale'],['odoScale','odoScale'],['gpsScale','gpsScale'],['gpsHz','gpsHz']])if(preferences[key]!=null)$(id).value=preferences[key];
-setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);setInterval(()=>pollTrips(false),5000);
+setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);setInterval(()=>pollTrips(false),5000);setInterval(()=>pollTrajectories(false),5000);
