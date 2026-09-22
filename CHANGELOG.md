@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.1
+
+- Draw virtual steering trajectories as separate map fragments when Navigation
+  reports a missing wheel-angle interval; no line is invented across a CAN gap.
+
 ## 1.10.6
 
 - Accept and journal complete 2GIS route snapshots from Navigation alongside

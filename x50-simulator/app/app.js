@@ -309,6 +309,23 @@ function projectTrajectoryPoints(points, anchorLat, anchorLon, initialBearingDeg
   });
 }
 
+// segment_id starts a new fragment after an interval without fresh CAN wheel
+// data. Keep those fragments separate so the renderer never invents motion.
+function splitTrajectorySegments(projected){
+  const segments=[];
+  let current=[];
+  let currentId=null;
+  for(const point of projected){
+    const raw=Number(point.pt?.segment_id);
+    const segmentId=Number.isFinite(raw)?raw:0; // v1 recordings have no id
+    if(current.length&&segmentId!==currentId){segments.push(current);current=[];}
+    currentId=segmentId;
+    current.push(point);
+  }
+  if(current.length)segments.push(current);
+  return segments;
+}
+
 function getTrajectoryAnchor(){
   if(trajectoryAnchorMode==='click'&&state?.selected){
     return [state.selected.lat,state.selected.lon,trajectoryBearing];
@@ -355,10 +372,19 @@ function drawSelectedTrajectory(fit=false){
   const projected=projectTrajectoryPoints(pts,anchorLat,anchorLon,bearingToUse,scaleToUse);
   if(!projected.length)return;
 
-  const latlngs=projected.map(p=>[p.lat,p.lon]);
-  L.polyline(latlngs,{color:'#d946ef',weight:5,opacity:.95,lineCap:'round',lineJoin:'round',dashArray:'6 6'}).bindTooltip(`Траектория (руль): ${pts.length} точек · ${(Number(traj.distance_m)||0).toFixed(1)} м`).addTo(trajectoryLayer);
+  // Keep a flattened copy only for fitting the map to all fragments.
+  const latlngs=[];
 
   trajectoryAnchorMarker.setLatLng([anchorLat,anchorLon]).bindTooltip(`Точка старта траектории`).addTo(trajectoryLayer);
+
+  const trajectorySegments=splitTrajectorySegments(projected);
+  trajectorySegments.forEach((segment,index)=>{
+    const coordinates=segment.map(p=>[p.lat,p.lon]);
+    latlngs.push(...coordinates);
+    if(coordinates.length>1){
+      L.polyline(coordinates,{color:'#d946ef',weight:5,opacity:.95,lineCap:'round',lineJoin:'round',dashArray:'6 6'}).bindTooltip(`Steering trajectory fragment ${index+1}/${trajectorySegments.length}`).addTo(trajectoryLayer);
+    }
+  });
 
   for(let i=0;i<projected.length;i+=Math.max(1,Math.floor(projected.length/25))){
     const p=projected[i];
