@@ -49,6 +49,43 @@ class TrajectoryStoreTest(unittest.TestCase):
         self.assertEqual(2, item["point_count"])
         self.assertTrue(item["has_anchor"])
 
+    def test_live_snapshot_is_updated_and_matched_to_overlapping_trip(self):
+        sample = {
+            "trajectory_id": "trip_trace",
+            "started_at_ms": 1700000000000,
+            "ended_at_ms": 1700000010000,
+            "complete": False,
+            "observed_at_ms": 1700000005000,
+            "points": [{"x_m": 0, "y_m": 0}],
+        }
+        self.assertEqual(200, self.store.save(sample)[1])
+        index_item = {
+            "snapshot_id": "trip_trace",
+            "point_count": 2,
+            "complete": True,
+            "observed_at_ms": 1700000011000,
+        }
+        self.assertTrue(self.store.needs_sync(index_item))
+        sample.update({
+            "ended_at_ms": 1700000010000,
+            "complete": True,
+            "observed_at_ms": 1700000011000,
+            "points": [{"x_m": 0, "y_m": 0}, {"x_m": 1, "y_m": 1}],
+        })
+        self.assertEqual(200, self.store.save(sample)[1])
+        self.assertFalse(self.store.needs_sync(index_item))
+        matched = self.store.overlapping(1700000001000, 1700000009000)
+        self.assertEqual(["trip_trace"], [item["trajectory_id"] for item in matched])
+
+    def test_non_overlapping_trajectory_is_not_attached_to_trip(self):
+        self.store.save({
+            "trajectory_id": "other_trip",
+            "started_at_ms": 1700001000000,
+            "ended_at_ms": 1700001010000,
+            "points": [{"x_m": 0, "y_m": 0}],
+        })
+        self.assertEqual([], self.store.overlapping(1700000000000, 1700000010000))
+
     def test_detail_and_delete(self):
         sample = {
             "trajectory_id": "test_traj_002",

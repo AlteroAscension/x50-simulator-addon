@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.11.3
+
+- Automatically import live and archived steering trajectories from the native
+  HA integration into persistent add-on storage.
+- Attach traces to matching head-unit trip records and draw each steering-data
+  fragment over the trip map without connecting across missing-data gaps.
+- Show the HA-delivered steering angle and freshness in simulator diagnostics.
+
 ## 1.11.0
 
 - Added Virtual Trajectory Engine support: persistent storage, API endpoints (/api/controller/trajectories/*), and dynamic Leaflet visualization in Electric Magenta (#d946ef).

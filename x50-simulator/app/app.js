@@ -21,6 +21,7 @@ const tripRealTrackLayer = L.layerGroup().addTo(map);
 const tripFakeTrackLayer = L.layerGroup().addTo(map);
 const tripRouteLayer = L.layerGroup().addTo(map);
 const tripEventLayer = L.layerGroup().addTo(map);
+const tripTrajectoryLayer = L.layerGroup().addTo(map);
 const trajectoryLayer = L.layerGroup().addTo(map);
 const trajectoryAnchorMarker = L.circleMarker([0,0],{radius:7,weight:3,color:'#fff',fillColor:'#38e28b',fillOpacity:1,interactive:false});
 const segmentHighlight = L.polyline([], {color:'#ffbd4a',weight:10,opacity:.96,lineCap:'round',className:'segment-highlight'}).addTo(map);
@@ -248,14 +249,15 @@ function nearestTripPosition(samples,timeMs,fallback){
   const direct=validTripPoint(fallback,'carlinkit_lat','carlinkit_lon')||validTripPoint(fallback,'fake_lat','fake_lon');if(direct)return direct;
   let nearest=null,distance=Infinity;for(const sample of samples){const point=validTripPoint(sample,'carlinkit_lat','carlinkit_lon')||validTripPoint(sample,'fake_lat','fake_lon'),delta=Math.abs(Number(sample.time_ms)-timeMs);if(point&&delta<distance){nearest=point;distance=delta}}return nearest;
 }
+function nearestTripSample(samples,timeMs){let nearest=null,distance=Infinity;for(const sample of samples){const delta=Math.abs(Number(sample.time_ms)-timeMs);if(Number.isFinite(delta)&&delta<distance){nearest=sample;distance=delta}}return nearest}
 function routeTooltip(item){const route=item.route,id=String(route.route_id||'').slice(0,12)||'без ID';return `<b>Маршрут ${item.index+1}</b><br>${tripTime(item.start)} → ${tripTime(item.end)}<br>${route.route_source||'unknown'} · ${id}<br>${metric(Number(route.length_m)/1000,2,' км')} · ${route.point_count||route.points?.length||0} точек`}
 function renderTripRouteTimeline(data){
   const intervals=tripRouteIntervals(data);if(!intervals.length){$('tripRouteTimeline').innerHTML='<div class="trip-route-empty">Маршруты не записаны. Для старых поездок восстановить их задним числом невозможно.</div>';return}
   $('tripRouteTimeline').innerHTML=intervals.map((item,index)=>`${index?'<div class="trip-route-switch-icon">→</div>':''}<div class="trip-route-item" style="--route-color:${tripRouteColors[index%tripRouteColors.length]}"><b>Маршрут ${index+1}</b><span>${tripTime(item.start)} → ${tripTime(item.end)}</span><small>${item.route.route_source||'unknown'} · ${metric(Number(item.route.length_m)/1000,2,' км')} · ${item.route.point_count||item.route.points?.length||0} точек</small></div>`).join('');
 }
 function drawSelectedTrip(fit=false){
-  tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();
-  const samples=selectedTripData?.samples||[],events=selectedTripData?.events||[],routeIntervals=tripRouteIntervals(selectedTripData);
+  tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();tripTrajectoryLayer.clearLayers();
+  const samples=selectedTripData?.samples||[],events=selectedTripData?.events||[],routeIntervals=tripRouteIntervals(selectedTripData),trajectories=selectedTripData?.trajectories||[];
   const realSegments=splitTripTrack(samples,'carlinkit_lat','carlinkit_lon'),fakeSegments=splitTripTrack(samples,'fake_lat','fake_lon');
   if(tripTrackMode!=='fake'&&tripPointCount(realSegments)>1)L.polyline(realSegments,{color:'#36e6a1',weight:5,opacity:.95,lineCap:'round',lineJoin:'round',smoothFactor:.6}).addTo(tripRealTrackLayer);
   if(tripTrackMode!=='gps'&&tripPointCount(fakeSegments)>1)L.polyline(fakeSegments,{color:'#ffb33f',weight:4,opacity:.9,lineCap:'round',lineJoin:'round',dashArray:'8 7',smoothFactor:.6}).addTo(tripFakeTrackLayer);
@@ -274,12 +276,30 @@ function drawSelectedTrip(fit=false){
     L.polyline(points,{color,weight:5,opacity:.9,lineCap:'round',lineJoin:'round',smoothFactor:.25}).bindTooltip(routeTooltip(item)).addTo(tripRouteLayer);all.push(...points);
     const switchPoint=nearestTripPosition(samples,item.start,item.change);if(switchPoint){const icon=L.divIcon({className:'',html:`<div class="trip-route-marker" style="--route-color:${color}">${item.index+1}</div>`,iconSize:[24,24],iconAnchor:[12,12]});L.marker(switchPoint,{icon,zIndexOffset:850}).bindTooltip(`Переключение на маршрут ${item.index+1}<br>${tripTime(item.start)}`).addTo(tripRouteLayer)}
   }
+  let fragmentCount=0;
+  for(const [traceIndex,trajectory] of trajectories.entries()){
+    const points=trajectory.points||[];if(!points.length)continue;
+    const anchor=trajectory.anchor||{},started=Number(trajectory.started_at_ms)||Number(points[0].t_ms)||0;
+    const gpsPoint=nearestTripPosition(samples,started,{}),sample=nearestTripSample(samples,started);
+    const anchorLat=anchor.has_anchor?Number(anchor.start_latitude):gpsPoint?.[0];
+    const anchorLon=anchor.has_anchor?Number(anchor.start_longitude):gpsPoint?.[1];
+    const bearing=anchor.has_anchor&&Number.isFinite(Number(anchor.start_bearing_deg))
+      ?Number(anchor.start_bearing_deg):(Number(sample?.carlinkit_bearing)||0);
+    if(!Number.isFinite(anchorLat)||!Number.isFinite(anchorLon))continue;
+    const projected=projectTrajectoryPoints(points,anchorLat,anchorLon,bearing,1.0);
+    const fragments=splitTrajectorySegments(projected);fragmentCount+=fragments.length;
+    for(const fragment of fragments){
+      const coordinates=fragment.map(point=>[point.lat,point.lon]);
+      all.push(...coordinates);
+      if(coordinates.length>1)L.polyline(coordinates,{color:'#d946ef',weight:5,opacity:.95,lineCap:'round',lineJoin:'round',dashArray:'6 6'}).bindTooltip(`Траектория руля ${traceIndex+1} · ${trajectory.complete?'записана':'текущая'}, ${coordinates.length} точек`).addTo(tripTrajectoryLayer);
+    }
+  }
   if(travelPoints.length){L.circleMarker(travelPoints[0],{radius:7,weight:3,color:'#fff',fillColor:'#36e6a1',fillOpacity:1}).bindTooltip('Начало поездки').addTo(tripEventLayer);L.circleMarker(travelPoints[travelPoints.length-1],{radius:7,weight:3,color:'#fff',fillColor:'#ff6277',fillOpacity:1}).bindTooltip('Конец поездки').addTo(tripEventLayer)}
-  $('tripTrackStats').textContent=`GPS ${tripPointCount(realSegments)} · Fake ${tripPointCount(fakeSegments)} · маршрутов ${routeIntervals.length} · событий ${events.length}`;
+  $('tripTrackStats').textContent=`GPS ${tripPointCount(realSegments)} · Fake ${tripPointCount(fakeSegments)} · маршрутов ${routeIntervals.length} · рулевых кривых ${fragmentCount} · событий ${events.length}`;
   $('showTripOnMap').disabled=all.length<2;$('clearTripFromMap').disabled=all.length<2;
   if(fit&&all.length>1){map.fitBounds(L.latLngBounds(all),{padding:[70,70]});$('tripPanel').classList.remove('open')}
 }
-function clearTripTrack(){tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();$('clearTripFromMap').disabled=true;$('tripTrackStats').textContent='Трек скрыт'}
+function clearTripTrack(){tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();tripTrajectoryLayer.clearLayers();$('clearTripFromMap').disabled=true;$('tripTrackStats').textContent='Трек скрыт'}
 function renderTripDetail(data){
   const trip=data.summary||{},events=data.events||[],samples=data.samples||[],routes=data.routes||[],switches=data.route_switches||[];
   const device=tripDevice(trip);

@@ -1,6 +1,6 @@
 # X50 Telemetry — Home Assistant Add-on Repository
 
-![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.0-blue)
+![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.3-blue)
 ![HA Ingress](https://img.shields.io/badge/HA-Ingress%20Supported-brightgreen)
 
 Open source under the [MIT License](LICENSE).

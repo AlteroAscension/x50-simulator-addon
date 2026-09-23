@@ -6,7 +6,7 @@ from __future__ import annotations
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 from collections import deque
 import argparse
@@ -237,6 +237,8 @@ class TrajectoryStore:
                         "distance_m": data.get("distance_m", 0.0),
                         "point_count": data.get("point_count", len(data.get("points", []))),
                         "has_anchor": bool(data.get("anchor", {}).get("has_anchor")),
+                        "complete": bool(data.get("complete", False)),
+                        "observed_at_ms": data.get("observed_at_ms"),
                         "anchor": data.get("anchor"),
                         "vehicle_params": data.get("vehicle_params"),
                         "size_bytes": stat.st_size,
@@ -256,6 +258,49 @@ class TrajectoryStore:
                         pass
             items.sort(key=lambda x: x.get("modified_ms", 0), reverse=True)
             return {"ok": True, "trajectories": items}
+
+    def needs_sync(self, item):
+        """Whether a HA snapshot is newer than the local durable copy."""
+        snapshot_id = str(item.get("snapshot_id") or "")
+        if not snapshot_id:
+            return False
+        detail, status = self.detail(snapshot_id)
+        if status != 200:
+            return True
+        current = detail["trajectory"]
+        return (
+            int(item.get("point_count") or 0) != len(current.get("points", []))
+            or bool(item.get("complete", False)) != bool(current.get("complete", False))
+            or int(item.get("observed_at_ms") or 0)
+            > int(current.get("observed_at_ms") or 0)
+        )
+
+    def overlapping(self, started_ms, ended_ms, margin_ms=30_000):
+        """Return locally retained steering traces overlapping one trip."""
+        start = finite_number(started_ms)
+        end = finite_number(ended_ms)
+        if start is None:
+            return []
+        if end is None:
+            end = time.time() * 1000
+        start -= margin_ms
+        end += margin_ms
+        matches = []
+        for item in self.list().get("trajectories", []):
+            detail, status = self.detail(item.get("id"))
+            if status != 200:
+                continue
+            trajectory = detail.get("trajectory", {})
+            trace_start = finite_number(trajectory.get("started_at_ms"))
+            trace_end = finite_number(
+                trajectory.get("ended_at_ms"),
+                finite_number(trajectory.get("observed_at_ms"), trace_start),
+            )
+            if trace_start is not None and trace_end is not None \
+                    and trace_start <= end and trace_end >= start:
+                matches.append(trajectory)
+        matches.sort(key=lambda item: int(item.get("started_at_ms") or 0))
+        return matches
 
     def detail(self, trajectory_id):
         with self.lock:
@@ -549,6 +594,7 @@ class TripLogStore:
             "rejected_corrections", "progress_source", "carlinkit_lat", "carlinkit_lon",
             "fake_lat", "fake_lon", "off_route_passthrough", "off_route_distance_m",
             "off_route_candidate_fixes", "off_route_recovery_fixes",
+            "steering_angle_deg", "steering_fresh",
             "off_route_started_ms", "off_route_elapsed_ms",
             "off_route_started_route_generation", "gps_vehicle_speed_difference_kmh",
             "route_generation", "route_activation_count", "route_activated_at_ms",
@@ -1155,6 +1201,9 @@ class SimulationEngine:
         self.poll_thread = threading.Thread(target=self._poll_run, name="X50-GatewayPoll", daemon=True)
         self.thread.start()
         self.poll_thread.start()
+        self.trajectory_thread = threading.Thread(
+            target=self._trajectory_sync_run, name="X50-HATrajectorySync", daemon=True)
+        self.trajectory_thread.start()
 
     def close(self):
         self.closed = True
@@ -1445,6 +1494,14 @@ class SimulationEngine:
             return {"ok": False, "error": "invalid_ha_trajectory"}, 400
         return self.trajectory_store.save(trajectory)
 
+    def trip_detail(self, trip_id):
+        payload, status = self.trip_store.detail(trip_id)
+        if status == 200 and payload.get("ok"):
+            summary = payload.get("summary", {})
+            payload["trajectories"] = self.trajectory_store.overlapping(
+                summary.get("started_ms"), summary.get("ended_ms"))
+        return payload, status
+
     def reload_route(self, requested_source="mapkit"):
         if requested_source != "mapkit":
             return {"ok": False, "error": "invalid_route_source"}, 400
@@ -1507,6 +1564,44 @@ class SimulationEngine:
                 self._poll_status()
                 self._next_status_poll = time.monotonic() + 0.75
             time.sleep(0.08)
+
+    def _trajectory_sync_run(self):
+        """Import complete and changing steering snapshots from HA persistently."""
+        while not self.closed:
+            with self.lock:
+                mode = self.gateway_mode
+                ha_url = self.ha_url
+                ha_token = self.ha_token
+            if mode == "ha":
+                self._sync_ha_trajectories(ha_url, ha_token)
+            time.sleep(10.0)
+
+    def _sync_ha_trajectories(self, ha_url, ha_token):
+        listing, status = ha_request(
+            "belgee_x50/trajectories", "GET", ha_url=ha_url, ha_token=ha_token)
+        if status < 200 or status >= 300 or not isinstance(listing, dict):
+            return
+        items = listing.get("trajectories")
+        if not isinstance(items, list):
+            return
+        changed = [item for item in items if isinstance(item, dict)
+                   and self.trajectory_store.needs_sync(item)]
+        # Keep each pass bounded; later passes resume if HA retained a backlog
+        # while the simulator add-on was offline.
+        for item in changed[:5]:
+            snapshot_id = str(item.get("snapshot_id") or "")
+            if not snapshot_id or len(snapshot_id) > 160:
+                continue
+            snapshot, detail_status = ha_request(
+                "belgee_x50/trajectories/" + quote(snapshot_id, safe=""),
+                "GET", ha_url=ha_url, ha_token=ha_token)
+            trajectory = snapshot.get("trajectory") if isinstance(snapshot, dict) else None
+            if detail_status < 200 or detail_status >= 300 or not isinstance(trajectory, dict):
+                continue
+            trajectory = dict(trajectory)
+            trajectory["complete"] = bool(snapshot.get("complete", False))
+            trajectory["observed_at_ms"] = snapshot.get("observed_at_ms")
+            self.trajectory_store.save(trajectory)
 
     def _integrate(self, now):
         with self.lock:
@@ -2038,7 +2133,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.reply_json(self.engine.trip_store.list())
         elif path.startswith("/api/controller/trips/"):
             trip_id = path.rsplit("/", 1)[-1]
-            payload, status = self.engine.trip_store.detail(trip_id)
+            payload, status = self.engine.trip_detail(trip_id)
             self.reply_json(payload, status)
         elif path == "/api/controller/trajectories":
             self.reply_json(self.engine.trajectory_store.list())
