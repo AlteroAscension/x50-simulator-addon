@@ -596,9 +596,10 @@ $('trajectoryFileInput').addEventListener('change',event=>{
 $('fetchNavTrajectory').addEventListener('click',async()=>{
   try{
     toast('Запрашиваю траекторию с ГУ…');
+    const viaHa=state?.gateway_mode==='ha';
     const gwUrl=$('gatewayUrl').value||'http://127.0.0.1:8080';
-    const navUrl=gwUrl.replace(':8080',':8088')+'/api/trajectory/current';
-    const res=await request('/api/controller/trajectories/fetch',{method:'POST',body:JSON.stringify({url:navUrl})});
+    const navUrl=gwUrl+'/api/trajectory/current';
+    const res=await request('/api/controller/trajectories/fetch',{method:'POST',body:JSON.stringify(viaHa?{from_ha:true}:{url:navUrl,token:$('token').value.trim()})});
     toast(`Траектория получена: ${res.id} (${res.point_count} точек)`);
     await pollTrajectories(true);
     if(res.id)await loadTrajectory(res.id);

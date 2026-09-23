@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.2
+
+- Retrieve the authenticated steering-trajectory snapshot from Home Assistant
+  in HA / Internet mode; direct mode now uses Gateway's authenticated API.
+
 ## 1.11.1
 
 - Draw virtual steering trajectories as separate map fragments when Navigation

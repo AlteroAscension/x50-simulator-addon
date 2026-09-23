@@ -309,9 +309,12 @@ class TrajectoryStore:
                         return {"ok": False, "error": "delete_failed", "detail": str(error)}, 500
             return {"ok": False, "error": "not_found"}, 404
 
-    def fetch(self, url):
+    def fetch(self, url, token=""):
         try:
-            req = Request(url, headers={"X-X50-Client": "simulator-addon"}, method="GET")
+            headers = {"X-X50-Client": "simulator-addon"}
+            if token:
+                headers["X-X50-Token"] = token
+            req = Request(url, headers=headers, method="GET")
             with urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             if not isinstance(data, dict) or not data.get("points"):
@@ -1429,6 +1432,19 @@ class SimulationEngine:
         self.wake.set()
         return result, status
 
+    def fetch_ha_trajectory(self):
+        with self.lock:
+            ha_url = self.ha_url
+            ha_token = self.ha_token
+        snapshot, status = ha_request("belgee_x50/trajectory/latest", "GET",
+                                      ha_url=ha_url, ha_token=ha_token)
+        if status < 200 or status >= 300:
+            return snapshot, status
+        trajectory = snapshot.get("trajectory") if isinstance(snapshot, dict) else None
+        if not isinstance(trajectory, dict):
+            return {"ok": False, "error": "invalid_ha_trajectory"}, 400
+        return self.trajectory_store.save(trajectory)
+
     def reload_route(self, requested_source="mapkit"):
         if requested_source != "mapkit":
             return {"ok": False, "error": "invalid_route_source"}, 400
@@ -2060,8 +2076,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.reply_json(payload, status)
         elif path == "/api/controller/trajectories/fetch":
             data = self.read_json()
-            url = data.get("url") or (self.engine.gateway_url.replace(":8080", ":8088") + "/api/trajectory/current")
-            payload, status = self.engine.trajectory_store.fetch(url)
+            if data.get("from_ha"):
+                payload, status = self.engine.fetch_ha_trajectory()
+            else:
+                url = data.get("url") or (self.engine.gateway_url + "/api/trajectory/current")
+                token = str(data.get("token") or self.engine.token)
+                payload, status = self.engine.trajectory_store.fetch(url, token)
             self.reply_json(payload, status)
         elif path == "/api/location":
             data = self.read_json()
