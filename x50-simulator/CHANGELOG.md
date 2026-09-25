@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.11.4
+
+- Show applied steering corrections and steering-detected route departures on
+  the live trip map, chart and event table, separate from GPS corrections.
+- Recover steering fit, correction, departure and route-rebuild events from
+  completed Navigation journals retained by Home Assistant.
+- Keep journal event markers when a native trajectory takes precedence over
+  the reconstructed journal trajectory, without duplicating the line.
+- Restore steering traces and events from full journals after a Home Assistant
+  restart, with original timestamps and source labels.
+
 ## 1.11.3
 
 - Automatically import live and archived steering trajectories from the native

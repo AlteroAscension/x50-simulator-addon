@@ -6,7 +6,7 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(APP))
-from server import TrajectoryStore
+from server import SimulationEngine, TrajectoryStore
 
 
 class TrajectoryStoreTest(unittest.TestCase):
@@ -107,3 +107,20 @@ class TrajectoryStoreTest(unittest.TestCase):
         res, code = self.store.save({"invalid": "data"})
         self.assertEqual(400, code)
         self.assertFalse(res["ok"])
+
+    def test_complete_native_trace_takes_precedence_over_journal_fallback(self):
+        self.store.save({"trajectory_id": "journal_copy", "source": "ha_full_trip_journal",
+                         "started_at_ms": 1000, "ended_at_ms": 2000, "complete": True,
+                         "points": [{"t_ms": 1000}, {"t_ms": 2000}]})
+        self.store.save({"trajectory_id": "native_copy", "started_at_ms": 950,
+                         "ended_at_ms": 2050, "complete": True,
+                         "points": [{"t_ms": 950}, {"t_ms": 2050}]})
+        class TripStore:
+            def detail(self, _trip_id):
+                return {"ok": True, "summary": {"started_ms": 1000, "ended_ms": 2000}}, 200
+        engine = SimulationEngine.__new__(SimulationEngine)
+        engine.trip_store = TripStore()
+        engine.trajectory_store = self.store
+        payload, status = engine.trip_detail("trip")
+        self.assertEqual(200, status)
+        self.assertEqual(["native_copy"], [item["trajectory_id"] for item in payload["trajectories"]])

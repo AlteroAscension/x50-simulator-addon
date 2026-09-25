@@ -1,15 +1,36 @@
 # X50 Telemetry — Home Assistant Add-on Repository
 
-![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.3-blue)
+![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.4-blue)
 ![HA Ingress](https://img.shields.io/badge/HA-Ingress%20Supported-brightgreen)
 
 Open source under the [MIT License](LICENSE).
 
+### События коррекции по рулю на карте поездки
+
+Navigation передаёт `correction_mode=steering` в текущем статусе и записывает
+`steering_overlay_applied`, `steering_overlay_divergence_started/finished`,
+`steering_overlay_fit` и `steering_route_rebuild_handoff` в полный журнал поездки.
+Gateway или Relay отправляет архив частями в HA; HA сохраняет его без изменения
+событий. Симулятор показывает текущие применённые коррекции и переходы в режим
+схода сразу по телеметрии, а после загрузки архива добавляет точные события
+Navigation на линию траектории и в таблицу поездки. События, уже видимые по
+телеметрии, повторно не рисуются. Для архивных журналов без этих записей
+постфактум определить моменты коррекции или схода нельзя.
+
 Репозиторий официального дополнения **X50 Navigation Simulator** (версия
-**`1.11.0`**) для Home Assistant.
+**`1.11.4`**) для Home Assistant.
 
 В 1.11.0 добавлена поддержка визуализации и пост-калибровки виртуальных траекторий
 по датчикам руля (CAN ID 0x0E0), скорости и одометра.
+
+В режиме HA симулятор сначала забирает отдельные снимки траектории из
+`/api/belgee_x50/trajectories`. Если HA был перезапущен и эти снимки уже
+отсутствуют в памяти, симулятор автоматически читает завершённые архивы
+`/api/belgee_x50/trip-journals`, проверяет SHA-256 и извлекает записанные
+Navigation точки траектории. Архивы кэшируются в `/data/x50-trip-journals`,
+а линии сохраняются в `/data/x50-trajectories` и появляются у поездок по
+времени их записи. Расчёт угла из GPS для этого не требуется; GPS или маршрут
+используются только для размещения локальной линии на карте.
 
 Версия 1.10.1 получает полный MapKit-маршрут реального ГУ прямо из уже
 существующего `sensor.x50_trip_diagnostics` и сохраняет его в истории поездки

@@ -16,11 +16,14 @@ import hashlib
 import json
 import math
 import os
+import re
 import socket
 import subprocess
 import threading
 import time
 import uuid
+
+from journal_trajectory import journal_points, journal_steering_events, trajectory_for_trip
 
 
 ROOT = Path(__file__).parent
@@ -64,6 +67,19 @@ def ha_request(endpoint: str, method: str = "POST", data=None, ha_url=None, ha_t
             return json.loads(payload) if payload else {"ok": True}, response.status
     except Exception as error:
         return {"ok": False, "error": "ha_unreachable", "detail": str(error)}, 502
+
+
+def ha_journal_download(journal_id, ha_url, ha_token):
+    """Fetch a completed HA archive; keep bearer credentials out of storage."""
+    base = (ha_url or os.environ.get("HA_URL", "http://supervisor/core")).rstrip("/")
+    token = ha_token or os.environ.get("SUPERVISOR_TOKEN", "")
+    request = Request(f"{base}/api/belgee_x50/trip-journals/{quote(journal_id, safe='')}",
+                      headers={"Authorization": f"Bearer {token}"}, method="GET")
+    with urlopen(request, timeout=20) as response:
+        payload = response.read(256 * 1024 * 1024 + 1)
+    if len(payload) > 256 * 1024 * 1024:
+        raise ValueError("trip journal exceeds size limit")
+    return payload
 
 
 def clamp(value, low, high):
@@ -394,6 +410,7 @@ class TripLogStore:
         self.last_correction_abs_total_m = None
         self.last_recovery_correction_count = None
         self.last_gps_good = None
+        self.last_steering_diverged = False
         self.outage = None
         self.latest_route_snapshot = None
         self.active_route_snapshot_id = None
@@ -455,6 +472,7 @@ class TripLogStore:
         self.last_recovery_correction_count = int(
             finite_number(data.get("recovery_correction_count"), 0) or 0)
         self.last_gps_good = self._gps_good(data)
+        self.last_steering_diverged = data.get("mode") == "off_route_steering"
         self.outage = None
         self.active_route_snapshot_id = None
         self.known_route_snapshot_ids = set()
@@ -630,12 +648,15 @@ class TripLogStore:
         if current_abs_total is not None and self.last_correction_abs_total_m is not None:
             correction_abs = max(0.0, current_abs_total - self.last_correction_abs_total_m)
         event = self._event_base(now_ms, data, context)
-        event.update({"event": "gps_progress_correction", "correction_m": correction,
+        steering = data.get("correction_mode") == "steering"
+        event.update({"event": "steering_progress_correction" if steering else "gps_progress_correction", "correction_m": correction,
                       "correction_abs_m": correction_abs,
                       "last_single_correction_m": last_single,
                       "corrections_since_sample": batch})
         self._append(self.active["id"], event)
         self.active["correction_events"] += 1
+        if steering:
+            self.active["steering_correction_events"] = self.active.get("steering_correction_events", 0) + 1
         self.active["correction_operations"] += batch
         current_recovery_count = int(
             finite_number(data.get("recovery_correction_count"),
@@ -770,6 +791,14 @@ class TripLogStore:
             elif self.last_gps_good is False and gps_good:
                 self._finish_outage(now_ms, data, context)
             self.last_gps_good = gps_good
+            steering_diverged = data.get("mode") == "off_route_steering"
+            if steering_diverged != self.last_steering_diverged:
+                event = self._event_base(now_ms, data, context)
+                event["event"] = ("steering_overlay_divergence_started" if steering_diverged
+                                  else "steering_overlay_divergence_finished")
+                event["source"] = "navigation_telemetry"
+                self._append(self.active["id"], event)
+            self.last_steering_diverged = steering_diverged
             correction_count = int(finite_number(data.get("correction_count"), self.last_correction_count or 0) or 0)
             if self.last_correction_count is not None and correction_count > self.last_correction_count:
                 self._record_correction(now_ms, data, context, self.last_correction_count, correction_count)
@@ -1193,6 +1222,13 @@ class SimulationEngine:
         self.route_hook = LiveRouteHook(adb, device, os.environ.get("X50_ROUTE_AGENT"))
         self.trip_store = TripLogRegistry()
         self.trajectory_store = TrajectoryStore()
+        self.journal_dir = Path(os.environ.get("X50_JOURNAL_CACHE_DIR", "/data/x50-trip-journals"))
+        try:
+            self.journal_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            self.journal_dir = ROOT / ".x50-trip-journals"
+            self.journal_dir.mkdir(parents=True, exist_ok=True)
+        self.journal_points_cache = {}
         self._last_integrate = time.monotonic()
         self._next_send = self._last_integrate
         self._next_route_poll = 0.0
@@ -1498,8 +1534,28 @@ class SimulationEngine:
         payload, status = self.trip_store.detail(trip_id)
         if status == 200 and payload.get("ok"):
             summary = payload.get("summary", {})
-            payload["trajectories"] = self.trajectory_store.overlapping(
+            trajectories = self.trajectory_store.overlapping(
                 summary.get("started_ms"), summary.get("ended_ms"))
+            native = [item for item in trajectories if item.get("complete")
+                      and item.get("source") not in
+                      ("ha_full_trip_journal", "experimental_steering_calibration")]
+            def covered_by_native(journal):
+                start = finite_number(journal.get("started_at_ms"))
+                end = finite_number(journal.get("ended_at_ms"))
+                if start is None or end is None or end <= start:
+                    return False
+                return any(
+                    (min(end, finite_number(item.get("ended_at_ms"), end))
+                     - max(start, finite_number(item.get("started_at_ms"), start)))
+                    >= 0.9 * (end - start)
+                    for item in native)
+            payload["trajectories"] = [
+                item for item in trajectories
+                if item.get("source") != "ha_full_trip_journal" or not covered_by_native(item)]
+            payload["trajectory_event_overlays"] = [
+                dict(item, hide_line=True) for item in trajectories
+                if item.get("source") == "ha_full_trip_journal"
+                and covered_by_native(item) and item.get("events")]
         return payload, status
 
     def reload_route(self, requested_source="mapkit"):
@@ -1573,7 +1629,11 @@ class SimulationEngine:
                 ha_url = self.ha_url
                 ha_token = self.ha_token
             if mode == "ha":
-                self._sync_ha_trajectories(ha_url, ha_token)
+                try:
+                    self._sync_ha_trajectories(ha_url, ha_token)
+                    self._sync_ha_journals(ha_url, ha_token)
+                except Exception as error:
+                    print("HA steering trajectory sync failed:", type(error).__name__, flush=True)
             time.sleep(10.0)
 
     def _sync_ha_trajectories(self, ha_url, ha_token):
@@ -1602,6 +1662,59 @@ class SimulationEngine:
             trajectory["complete"] = bool(snapshot.get("complete", False))
             trajectory["observed_at_ms"] = snapshot.get("observed_at_ms")
             self.trajectory_store.save(trajectory)
+
+    def _sync_ha_journals(self, ha_url, ha_token):
+        """Restore raw trip traces when HA has retained only the full journal."""
+        listing, status = ha_request("belgee_x50/trip-journals", "GET",
+                                     ha_url=ha_url, ha_token=ha_token)
+        if status != 200 or not isinstance(listing, dict):
+            return
+        trips = [item for item in self.trip_store.list().get("trips", [])
+                 if item.get("device_kind") == "head_unit" and item.get("ended_ms")]
+        for item in listing.get("journals", [])[-50:]:
+            journal_id = str(item.get("id") or "")
+            expected_hash = str(item.get("sha256") or "")
+            if not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}", journal_id):
+                continue
+            if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+                continue
+            path = self.journal_dir / f"{journal_id}.jsonl.gz"
+            if not path.is_file() or self.journal_points_cache.get(journal_id, (None,))[0] != expected_hash:
+                if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+                    payload = ha_journal_download(journal_id, ha_url, ha_token)
+                    if hashlib.sha256(payload).hexdigest() != expected_hash:
+                        continue
+                    temporary = path.with_suffix(path.suffix + ".tmp")
+                    temporary.write_bytes(payload)
+                    temporary.replace(path)
+                self.journal_points_cache[journal_id] = (
+                    expected_hash, journal_points(path), journal_steering_events(path))
+            cached = self.journal_points_cache[journal_id]
+            if len(cached) < 3:
+                cached = (expected_hash, cached[1], journal_steering_events(path))
+                self.journal_points_cache[journal_id] = cached
+            points, steering_events = cached[1], cached[2]
+            if len(points) < 2:
+                continue
+            first, last = points[0]["t_ms"], points[-1]["t_ms"]
+            for trip in trips:
+                if trip["started_ms"] > last or trip["ended_ms"] < first:
+                    continue
+                trajectory_id = f"journal_{journal_id}_{trip['id']}"
+                existing_path = self.trajectory_store.root / f"trajectory-{trajectory_id}.json"
+                if existing_path.is_file():
+                    try:
+                        existing = json.loads(existing_path.read_text(encoding="utf-8"))
+                        if "events" in existing:
+                            continue
+                    except (OSError, ValueError):
+                        pass
+                detail, trip_status = self.trip_store.detail(trip["id"])
+                if trip_status != 200:
+                    continue
+                trajectory = trajectory_for_trip(points, journal_id, detail, steering_events)
+                if trajectory is not None:
+                    self.trajectory_store.save(trajectory)
 
     def _integrate(self, now):
         with self.lock:
