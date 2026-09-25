@@ -55,7 +55,9 @@ class JournalTrajectoryTest(unittest.TestCase):
                 {"type": "steering_overlay_divergence_started", "time_ms": 1080,
                  "seq": 9, "data": {"fake_lat": 55.1, "fake_lon": 37.1}},
                 {"type": "steering_overlay_fit", "time_ms": 1200,
-                 "seq": 10, "data": {"rms_m": 3.0}},
+                 "seq": 10, "data": {"rms_m": 3.0, "aligned": True,
+                                      "aligned_lat": 55.12, "aligned_lon": 37.13,
+                                      "route_generation": 4}},
                 {"type": "steering_overlay_applied", "time_ms": 1040,
                  "seq": 11, "data": {"applied_m": 0.2}},
                 {"type": "steering_overlay_applied", "time_ms": 1060,
@@ -83,3 +85,7 @@ class JournalTrajectoryTest(unittest.TestCase):
             divergence = next(event for event in trajectory["events"]
                               if event["event"] == "steering_overlay_divergence_started")
             self.assertEqual(55.1, divergence["data"]["fake_lat"])
+            fit = next(event for event in events if event["event"] == "steering_overlay_fit")
+            self.assertEqual((55.12, 37.13, 4),
+                             (fit["data"]["aligned_lat"], fit["data"]["aligned_lon"],
+                              fit["data"]["route_generation"]))

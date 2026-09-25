@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.5
+
+- Draw Navigation's route-aligned steering positions as a separate line on the captured route.
+- Preserve the raw steering trace and break the aligned line at rejected fits, gaps and route changes.
+
 ## 1.11.4
 
 - Show applied steering corrections and steering-detected route departures on

@@ -1,6 +1,6 @@
 # X50 Telemetry — Home Assistant Add-on Repository
 
-![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.4-blue)
+![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.5-blue)
 ![HA Ingress](https://img.shields.io/badge/HA-Ingress%20Supported-brightgreen)
 
 Open source under the [MIT License](LICENSE).
@@ -18,7 +18,7 @@ Navigation на линию траектории и в таблицу поезд�
 постфактум определить моменты коррекции или схода нельзя.
 
 Репозиторий официального дополнения **X50 Navigation Simulator** (версия
-**`1.11.4`**) для Home Assistant.
+**`1.11.5`**) для Home Assistant.
 
 В 1.11.0 добавлена поддержка визуализации и пост-калибровки виртуальных траекторий
 по датчикам руля (CAN ID 0x0E0), скорости и одометра.

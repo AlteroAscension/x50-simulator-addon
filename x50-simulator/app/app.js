@@ -354,10 +354,25 @@ function drawSelectedTrip(fit=false){
       if(coordinates.length>1)L.polyline(coordinates,style).bindTooltip(`${label} · ${trajectory.complete?'записана':'текущая'}, ${coordinates.length} точек`).addTo(tripTrajectoryLayer);
     }
   }
+  // Navigation publishes a route coordinate only after a bounded steering
+  // fit. Keep the raw journal trace above for diagnosis, and show the actual
+  // route-locked result separately. Break the line at a rejected fit or gap.
+  const alignedEvents=journalSteeringEvents(selectedTripData).filter(event=>event.event==='steering_overlay_fit').sort((a,b)=>Number(a.time_ms)-Number(b.time_ms));
+  let alignedSegment=[],previousAlignedTime=0,previousAlignedRoute=null,alignedCount=0;
+  function flushAlignedSegment(){if(alignedSegment.length>1){L.polyline(alignedSegment,{color:'#38bdf8',weight:7,opacity:.9,lineCap:'round',lineJoin:'round'}).bindTooltip('Траектория руля, наложенная на маршрут').addTo(tripTrajectoryLayer);all.push(...alignedSegment);alignedCount+=alignedSegment.length}alignedSegment=[]}
+  for(const event of alignedEvents){
+    const stamp=Number(event.time_ms),position=validTripPoint(event.data||{},'aligned_lat','aligned_lon');
+    if(!position||event.data?.diverged){flushAlignedSegment();previousAlignedTime=0;previousAlignedRoute=null;continue}
+    const route=event.data?.route_generation;
+    if(previousAlignedTime&&(stamp-previousAlignedTime>5000||route!==previousAlignedRoute))flushAlignedSegment();
+    alignedSegment.push(position);previousAlignedTime=stamp;previousAlignedRoute=route;
+  }
+  flushAlignedSegment();
   if(travelPoints.length){L.circleMarker(travelPoints[0],{radius:7,weight:3,color:'#fff',fillColor:'#36e6a1',fillOpacity:1}).bindTooltip('Начало поездки').addTo(tripEventLayer);L.circleMarker(travelPoints[travelPoints.length-1],{radius:7,weight:3,color:'#fff',fillColor:'#ff6277',fillOpacity:1}).bindTooltip('Конец поездки').addTo(tripEventLayer)}
   $('tripTrackStats').textContent=`GPS ${tripPointCount(realSegments)} · Fake ${tripPointCount(fakeSegments)} · маршрутов ${routeIntervals.length} · траекторий руля ${trajectories.filter(t=>!t.hide_line).length} (${fragmentCount} фрагментов) · событий ${events.length} + ${journalSteeringEvents(selectedTripData).length} по рулю`;
   if(trajectories.some(trajectory=>trajectory.source==='ha_full_trip_journal'&&!trajectory.hide_line))$('tripTrackStats').insertAdjacentHTML('beforeend',' · <span style="color:#d946ef">пурпурный пунктир — траектория из журнала</span>');
   if(trajectories.some(trajectory=>trajectory.source==='experimental_steering_calibration'))$('tripTrackStats').insertAdjacentHTML('beforeend',' · <span style="color:#22d3ee">голубая линия — эксперимент +2,8°, G 19,5</span>');
+  if(alignedCount)$('tripTrackStats').insertAdjacentHTML('beforeend',` · <span style="color:#38bdf8">голубая линия — наложение руля на маршрут (${alignedCount} точек)</span>`);
   $('showTripOnMap').disabled=all.length<2;$('clearTripFromMap').disabled=all.length<2;
   if(fit&&all.length>1){map.fitBounds(L.latLngBounds(all),{padding:[70,70]});$('tripPanel').classList.remove('open')}
 }
