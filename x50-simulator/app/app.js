@@ -310,9 +310,9 @@ function drawSelectedTrip(fit=false){
   let alignedCount=0;
   for(const [traceIndex,trajectory] of trajectories.entries()){
     const points=trajectory.points||[];if(!points.length)continue;
-    let hasDenseAlignment=false;
     const experimental=trajectory.source==='experimental_steering_calibration';
     const rawJournal=trajectory.source==='ha_full_trip_journal';
+    const navigationTrajectory=isNavigationTrajectory(trajectory);
     const style=experimental
       ?{color:'#22d3ee',weight:5,opacity:.98,lineCap:'round',lineJoin:'round'}
       :{color:'#d946ef',weight:5,opacity:.95,lineCap:'round',lineJoin:'round',dashArray:'6 6'};
@@ -343,17 +343,17 @@ function drawSelectedTrip(fit=false){
           L.polyline([position,closest],{color,weight:2,dashArray:'4 5',opacity:.85}).bindTooltip(`До ближайшей записанной точки маршрута: ${map.distance(position,closest).toFixed(1)} м`).addTo(tripEventLayer)}
       }
     }
-    if(rawJournal&&!trajectory.hide_line){
+    if(navigationTrajectory&&!trajectory.hide_line){
       const aligned=alignJournalPoints(points,samples,selectedTripData?.routes||[]);
       const segments=splitAlignedJournalSegments(aligned,(a,b)=>map.distance([a.lat,a.lon],[b.lat,b.lon]));
       for(const segment of segments){const coordinates=segment.map(point=>[point.lat,point.lon]);
         L.polyline(coordinates,{color:'#38bdf8',weight:7,opacity:.92,lineCap:'round',lineJoin:'round'})
           .bindTooltip('Рулевая траектория по прогрессу FakeGPS; повороты и съезд проверяются по рулю').addTo(tripTrajectoryLayer);
-        all.push(...coordinates);alignedCount+=coordinates.length;hasDenseAlignment=true;
+        all.push(...coordinates);alignedCount+=coordinates.length;
       }
     }
-    if(trajectory.hide_line||rawJournal&&!tripShowRawSteering&&hasDenseAlignment)continue;
-    if(rawJournal)rawLineVisibleCount++;
+    if(trajectory.hide_line||navigationTrajectory&&!tripShowRawSteering)continue;
+    if(navigationTrajectory)rawLineVisibleCount++;
     const fragments=splitTrajectorySegments(projected);fragmentCount+=fragments.length;
     for(const fragment of fragments){
       const coordinates=fragment.map(point=>[point.lat,point.lon]);
@@ -379,6 +379,7 @@ function drawSelectedTrip(fit=false){
   if(rawLineVisibleCount)$('tripTrackStats').insertAdjacentHTML('beforeend',' · <span style="color:#d946ef">пурпурный пунктир — исходная траектория</span>');
   if(trajectories.some(trajectory=>trajectory.source==='experimental_steering_calibration'))$('tripTrackStats').insertAdjacentHTML('beforeend',' · <span style="color:#22d3ee">голубая линия — эксперимент +2,8°, G 19,5</span>');
   if(alignedCount)$('tripTrackStats').insertAdjacentHTML('beforeend',` · <span style="color:#38bdf8">голубая линия — точки руля по FakeGPS (${alignedCount})</span>`);
+  else if(trajectories.some(isNavigationTrajectory))$('tripTrackStats').insertAdjacentHTML('beforeend',' · рулевая линия не привязана: нет пригодных точек FakeGPS и маршрута');
   $('showTripOnMap').disabled=all.length<2;$('clearTripFromMap').disabled=all.length<2;
   if(fit&&all.length>1){map.fitBounds(L.latLngBounds(all),{padding:[70,70]});$('tripPanel').classList.remove('open')}
 }

@@ -1,4 +1,10 @@
 /* Dense route-constrained steering points. The sensor x/y trace remains raw. */
+function isNavigationTrajectory(trajectory) {
+  return !!trajectory && trajectory.source !== 'experimental_steering_calibration'
+    && (trajectory.source === 'ha_full_trip_journal'
+      || trajectory.trajectory_schema === 'x50.virtual-trajectory.v2');
+}
+
 function alignJournalPoints(points, samples, routes = []) {
   const valid = (lat, lon) => lat != null && lon != null
     && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))
@@ -106,5 +112,5 @@ function splitAlignedJournalSegments(aligned, distanceMetres) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  alignJournalPoints, splitAlignedJournalSegments
+  alignJournalPoints, splitAlignedJournalSegments, isNavigationTrajectory
 };

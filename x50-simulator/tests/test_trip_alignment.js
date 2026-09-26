@@ -1,5 +1,10 @@
 const assert = require('node:assert/strict');
-const {alignJournalPoints, splitAlignedJournalSegments} = require('../app/trip_alignment.js');
+const {alignJournalPoints, splitAlignedJournalSegments, isNavigationTrajectory} = require('../app/trip_alignment.js');
+
+assert.equal(isNavigationTrajectory({trajectory_schema: 'x50.virtual-trajectory.v2'}), true);
+assert.equal(isNavigationTrajectory({source: 'ha_full_trip_journal'}), true);
+assert.equal(isNavigationTrajectory({source: 'experimental_steering_calibration',
+  trajectory_schema: 'x50.virtual-trajectory.v2'}), false);
 
 const samples = [
   {time_ms: 1000, mode: 'fake', fake_provider_enabled: true,

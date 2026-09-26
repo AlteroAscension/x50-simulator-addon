@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.7
+
+- Apply the FakeGPS route alignment to native Navigation trajectory snapshots as well as completed full-journal trajectories. The previous viewer only aligned full journals, which may arrive later or not at all.
+- Keep the raw x/y projection behind the diagnostic toggle. When no route and no FakeGPS anchors exist, report that the trajectory cannot be geographically aligned instead of displaying a misleading displaced line.
+
 ## 1.11.6
 
 - Draw dense steering points along the published FakeGPS route position in the trip map.
