@@ -29,7 +29,8 @@ from journal_trajectory import journal_points, journal_steering_events, trajecto
 ROOT = Path(__file__).parent
 GATEWAY = os.environ.get("X50_GATEWAY_URL", "http://127.0.0.1:8080")
 STATIC_FILES = {"/": "index.html", "/index.html": "index.html",
-                "/app.js": "app.js", "/styles.css": "styles.css"}
+                "/app.js": "app.js", "/trip_alignment.js": "trip_alignment.js",
+                "/styles.css": "styles.css"}
 
 
 def gateway_request(path: str, method: str = "GET", data=None, token="x50test", base_url=None):

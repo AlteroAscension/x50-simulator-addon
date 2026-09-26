@@ -75,6 +75,7 @@
             <button data-trip-track="fake">FakeGPS</button>
           </div>
           <button class="small-button active trip-route-toggle" id="tripRouteToggle" aria-pressed="true">Маршруты</button>
+          <button class="small-button" id="tripRawSteeringToggle" aria-pressed="false" title="Показать исходную несвязанную траекторию для диагностики">Сырая линия руля</button>
           <button class="small-button active" id="liveRouteToggle" aria-pressed="true" title="Показывать текущий маршрут ГУ поверх архива">Текущий маршрут</button>
           <button class="small-button" id="showTripOnMap" disabled>Показать на карте</button>
           <button class="small-button subtle" id="clearTripFromMap" disabled>Скрыть трек</button>
@@ -255,6 +256,7 @@
 
   <div class="toast" id="toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20260724-device-split-v1"></script>
+  <script src="trip_alignment.js?v=20260926-fakegps-anchor"></script>
+<script src="app.js?v=20260926-fakegps-anchor"></script>
 </body>
 </html>

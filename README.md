@@ -1,11 +1,20 @@
 # X50 Telemetry — Home Assistant Add-on Repository
 
-![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.5-blue)
+![Add-on Version](https://img.shields.io/badge/Add--on-v1.11.6-blue)
 ![HA Ingress](https://img.shields.io/badge/HA-Ingress%20Supported-brightgreen)
 
 Open source under the [MIT License](LICENSE).
 
 ### События коррекции по рулю на карте поездки
+
+В карте поездки основная голубая рулевая линия следует точкам FakeGPS.
+Новые журналы Navigation содержат координаты привязки у каждой сохранённой
+точки; для старых журналов интерфейс восстанавливает их по прогрессу FakeGPS
+на захваченной геометрии и соседним снимкам, не соединяя разные маршруты и
+интервалы без FakeGPS.
+Пурпурная исходная траектория включается кнопкой «Сырая линия руля».
+Близость голубой линии к дороге задана выбранной маршрутной привязкой и
+сама по себе не доказывает точности рулевого датчика или факта съезда.
 
 Navigation передаёт `correction_mode=steering` в текущем статусе и записывает
 `steering_overlay_applied`, `steering_overlay_divergence_started/finished`,
@@ -18,7 +27,7 @@ Navigation на линию траектории и в таблицу поезд�
 постфактум определить моменты коррекции или схода нельзя.
 
 Репозиторий официального дополнения **X50 Navigation Simulator** (версия
-**`1.11.5`**) для Home Assistant.
+**`1.11.6`**) для Home Assistant.
 
 В 1.11.0 добавлена поддержка визуализации и пост-калибровки виртуальных траекторий
 по датчикам руля (CAN ID 0x0E0), скорости и одометра.

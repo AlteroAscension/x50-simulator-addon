@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.6
+
+- Draw dense steering points along the published FakeGPS route position in the trip map.
+- Recover aligned positions from recorded FakeGPS progress and captured route geometry for older journals, with breaks at route changes and unavailable FakeGPS intervals.
+- Keep the raw sensor trajectory available through the separate diagnostic toggle.
+
 ## 1.11.5
 
 - Draw Navigation's route-aligned steering positions as a separate line on the captured route.

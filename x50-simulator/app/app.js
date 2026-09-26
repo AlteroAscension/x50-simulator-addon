@@ -28,7 +28,7 @@ const segmentHighlight = L.polyline([], {color:'#ffbd4a',weight:10,opacity:.96,l
 const segmentInspectMarker = L.circleMarker([0,0],{radius:6,weight:2,color:'#fff',fillColor:'#ffbd4a',fillOpacity:1,interactive:false});
 let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null,mapkitRevision=null,routeLayerMode='both',stateBusy=false,routeBusy=false,toastTimer,lastShownError=null;
 let mapClickMode='gps',currentRoutePoints=[],currentMapkitData={},inspectedSegmentIndex=null,hasAutoFittedRoute=false,userAdjustedMap=false;
-let tripsBusy=false,selectedTripId=null,lastTripSignature='',selectedTripData=null,tripTrackMode='both',tripShowRoutes=true,liveRouteVisible=true;
+let tripsBusy=false,selectedTripId=null,lastTripSignature='',selectedTripData=null,tripTrackMode='both',tripShowRoutes=true,tripShowRawSteering=false,liveRouteVisible=true;
 let trajectoriesBusy=false,selectedTrajectoryId=null,lastTrajectorySignature='',selectedTrajectoryData=null,trajectoryAnchorMode='route',trajectoryBearing=0.0,trajectorySteerScale=1.0;
 const tripRouteColors=['#a977ff','#3bd6ff','#ff6fae','#ffe06b','#66e0bd','#ff916b','#79a7ff','#d9f06b'];
 
@@ -306,9 +306,11 @@ function drawSelectedTrip(fit=false){
     L.polyline(points,{color,weight:5,opacity:.9,lineCap:'round',lineJoin:'round',smoothFactor:.25}).bindTooltip(routeTooltip(item)).addTo(tripRouteLayer);all.push(...points);
     const switchPoint=nearestTripPosition(samples,item.start,item.change);if(switchPoint){const icon=L.divIcon({className:'',html:`<div class="trip-route-marker" style="--route-color:${color}">${item.index+1}</div>`,iconSize:[24,24],iconAnchor:[12,12]});L.marker(switchPoint,{icon,zIndexOffset:850}).bindTooltip(`Переключение на маршрут ${item.index+1}<br>${tripTime(item.start)}`).addTo(tripRouteLayer)}
   }
-  let fragmentCount=0;
+  let fragmentCount=0,rawLineVisibleCount=0;
+  let alignedCount=0;
   for(const [traceIndex,trajectory] of trajectories.entries()){
     const points=trajectory.points||[];if(!points.length)continue;
+    let hasDenseAlignment=false;
     const experimental=trajectory.source==='experimental_steering_calibration';
     const rawJournal=trajectory.source==='ha_full_trip_journal';
     const style=experimental
@@ -323,14 +325,9 @@ function drawSelectedTrip(fit=false){
     const anchorLon=anchor.has_anchor?Number(anchor.start_longitude):gpsPoint?.[1];
     const bearing=anchor.has_anchor&&Number.isFinite(Number(anchor.start_bearing_deg))
       ?Number(anchor.start_bearing_deg):(Number(sample?.carlinkit_bearing)||0);
-    if(!Number.isFinite(anchorLat)||!Number.isFinite(anchorLon)){
-      if(rawJournal)for(const event of journalSteeringEvents({trajectories:[trajectory],events})){
-        const position=validTripPoint(event.data||{},'fake_lat','fake_lon');
-        if(position)L.circleMarker(position,{renderer:rawRenderer,radius:8,weight:2,color:'#fff',fillColor:'#ff6277',fillOpacity:.95}).bindTooltip(steeringEventLabel(event)).addTo(tripEventLayer);
-      }
-      continue;
-    }
-    const projected=projectTrajectoryPoints(points,anchorLat,anchorLon,bearing,1.0);
+    const projected=Number.isFinite(anchorLat)&&Number.isFinite(anchorLon)
+      ?projectTrajectoryPoints(points,anchorLat,anchorLon,bearing,1.0):[];
+    if(!projected.length&&!rawJournal)continue;
     if(rawJournal)for(const event of journalSteeringEvents({trajectories:[trajectory],events})){
       const stamp=Number(event.time_ms),nearest=projected.reduce((best,point)=>!best||Math.abs(Number(point.pt?.t_ms)-stamp)<Math.abs(Number(best.pt?.t_ms)-stamp)?point:best,null);
       if(!nearest||Math.abs(Number(nearest.pt?.t_ms)-stamp)>10000)continue;
@@ -346,7 +343,17 @@ function drawSelectedTrip(fit=false){
           L.polyline([position,closest],{color,weight:2,dashArray:'4 5',opacity:.85}).bindTooltip(`До ближайшей записанной точки маршрута: ${map.distance(position,closest).toFixed(1)} м`).addTo(tripEventLayer)}
       }
     }
-    if(trajectory.hide_line)continue;
+    if(rawJournal&&!trajectory.hide_line){
+      const aligned=alignJournalPoints(points,samples,selectedTripData?.routes||[]);
+      const segments=splitAlignedJournalSegments(aligned,(a,b)=>map.distance([a.lat,a.lon],[b.lat,b.lon]));
+      for(const segment of segments){const coordinates=segment.map(point=>[point.lat,point.lon]);
+        L.polyline(coordinates,{color:'#38bdf8',weight:7,opacity:.92,lineCap:'round',lineJoin:'round'})
+          .bindTooltip('Рулевая траектория по прогрессу FakeGPS; повороты и съезд проверяются по рулю').addTo(tripTrajectoryLayer);
+        all.push(...coordinates);alignedCount+=coordinates.length;hasDenseAlignment=true;
+      }
+    }
+    if(trajectory.hide_line||rawJournal&&!tripShowRawSteering&&hasDenseAlignment)continue;
+    if(rawJournal)rawLineVisibleCount++;
     const fragments=splitTrajectorySegments(projected);fragmentCount+=fragments.length;
     for(const fragment of fragments){
       const coordinates=fragment.map(point=>[point.lat,point.lon]);
@@ -354,13 +361,12 @@ function drawSelectedTrip(fit=false){
       if(coordinates.length>1)L.polyline(coordinates,style).bindTooltip(`${label} · ${trajectory.complete?'записана':'текущая'}, ${coordinates.length} точек`).addTo(tripTrajectoryLayer);
     }
   }
-  // Navigation publishes a route coordinate only after a bounded steering
-  // fit. Keep the raw journal trace above for diagnosis, and show the actual
-  // route-locked result separately. Break the line at a rejected fit or gap.
+  // Older journals contain only sparse fit events. Use them when no dense
+  // FakeGPS-constrained points were recorded or reconstructed.
   const alignedEvents=journalSteeringEvents(selectedTripData).filter(event=>event.event==='steering_overlay_fit').sort((a,b)=>Number(a.time_ms)-Number(b.time_ms));
-  let alignedSegment=[],previousAlignedTime=0,previousAlignedRoute=null,alignedCount=0;
+  let alignedSegment=[],previousAlignedTime=0,previousAlignedRoute=null;
   function flushAlignedSegment(){if(alignedSegment.length>1){L.polyline(alignedSegment,{color:'#38bdf8',weight:7,opacity:.9,lineCap:'round',lineJoin:'round'}).bindTooltip('Траектория руля, наложенная на маршрут').addTo(tripTrajectoryLayer);all.push(...alignedSegment);alignedCount+=alignedSegment.length}alignedSegment=[]}
-  for(const event of alignedEvents){
+  for(const event of alignedCount?[]:alignedEvents){
     const stamp=Number(event.time_ms),position=validTripPoint(event.data||{},'aligned_lat','aligned_lon');
     if(!position||event.data?.diverged){flushAlignedSegment();previousAlignedTime=0;previousAlignedRoute=null;continue}
     const route=event.data?.route_generation;
@@ -370,9 +376,9 @@ function drawSelectedTrip(fit=false){
   flushAlignedSegment();
   if(travelPoints.length){L.circleMarker(travelPoints[0],{radius:7,weight:3,color:'#fff',fillColor:'#36e6a1',fillOpacity:1}).bindTooltip('Начало поездки').addTo(tripEventLayer);L.circleMarker(travelPoints[travelPoints.length-1],{radius:7,weight:3,color:'#fff',fillColor:'#ff6277',fillOpacity:1}).bindTooltip('Конец поездки').addTo(tripEventLayer)}
   $('tripTrackStats').textContent=`GPS ${tripPointCount(realSegments)} · Fake ${tripPointCount(fakeSegments)} · маршрутов ${routeIntervals.length} · траекторий руля ${trajectories.filter(t=>!t.hide_line).length} (${fragmentCount} фрагментов) · событий ${events.length} + ${journalSteeringEvents(selectedTripData).length} по рулю`;
-  if(trajectories.some(trajectory=>trajectory.source==='ha_full_trip_journal'&&!trajectory.hide_line))$('tripTrackStats').insertAdjacentHTML('beforeend',' · <span style="color:#d946ef">пурпурный пунктир — траектория из журнала</span>');
+  if(rawLineVisibleCount)$('tripTrackStats').insertAdjacentHTML('beforeend',' · <span style="color:#d946ef">пурпурный пунктир — исходная траектория</span>');
   if(trajectories.some(trajectory=>trajectory.source==='experimental_steering_calibration'))$('tripTrackStats').insertAdjacentHTML('beforeend',' · <span style="color:#22d3ee">голубая линия — эксперимент +2,8°, G 19,5</span>');
-  if(alignedCount)$('tripTrackStats').insertAdjacentHTML('beforeend',` · <span style="color:#38bdf8">голубая линия — наложение руля на маршрут (${alignedCount} точек)</span>`);
+  if(alignedCount)$('tripTrackStats').insertAdjacentHTML('beforeend',` · <span style="color:#38bdf8">голубая линия — точки руля по FakeGPS (${alignedCount})</span>`);
   $('showTripOnMap').disabled=all.length<2;$('clearTripFromMap').disabled=all.length<2;
   if(fit&&all.length>1){map.fitBounds(L.latLngBounds(all),{padding:[70,70]});$('tripPanel').classList.remove('open')}
 }
@@ -657,6 +663,7 @@ $('showTripOnMap').addEventListener('click',()=>{setLiveRouteVisible(false);draw
 $('clearTripFromMap').addEventListener('click',()=>{clearTripTrack();setLiveRouteVisible(true)});
 document.querySelectorAll('#tripTrackMode button').forEach(button=>button.addEventListener('click',()=>{tripTrackMode=button.dataset.tripTrack;document.querySelectorAll('#tripTrackMode button').forEach(item=>item.classList.toggle('active',item===button));drawSelectedTrip(false)}));
 $('tripRouteToggle').addEventListener('click',()=>{tripShowRoutes=!tripShowRoutes;$('tripRouteToggle').classList.toggle('active',tripShowRoutes);$('tripRouteToggle').setAttribute('aria-pressed',String(tripShowRoutes));drawSelectedTrip(false)});
+$('tripRawSteeringToggle').addEventListener('click',()=>{tripShowRawSteering=!tripShowRawSteering;$('tripRawSteeringToggle').classList.toggle('active',tripShowRawSteering);$('tripRawSteeringToggle').setAttribute('aria-pressed',String(tripShowRawSteering));drawSelectedTrip(false)});
 $('liveRouteToggle').addEventListener('click',()=>setLiveRouteVisible(!liveRouteVisible));
 $('finishTrip').addEventListener('click',async()=>{try{await request('/api/controller/trips/finish',{method:'POST',body:'{}'});selectedTripId=null;await pollTrips(true);toast('Поездка завершена')}catch(error){toast(error.message,true)}});
 $('settingsToggle').addEventListener('click',()=>$('settingsPanel').classList.toggle('open'));

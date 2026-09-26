@@ -17,7 +17,9 @@ class JournalTrajectoryTest(unittest.TestCase):
             points = [
                 {"t_ms": 900, "x_m": 0, "y_m": 0, "heading_deg": 0, "dist_m": 0, "segment_id": 0},
                 {"t_ms": 1000, "x_m": 10, "y_m": 5, "heading_deg": 90, "dist_m": 10, "segment_id": 1},
-                {"t_ms": 1100, "x_m": 10, "y_m": 7, "heading_deg": 95, "dist_m": 12, "segment_id": 1},
+                {"t_ms": 1100, "x_m": 10, "y_m": 7, "heading_deg": 95, "dist_m": 12,
+                 "segment_id": 1, "aligned_lat": 55.01, "aligned_lon": 37.01,
+                 "alignment_source": "fakegps_route", "alignment_route_generation": 3},
             ]
             with gzip.open(path, "wt", encoding="utf-8") as stream:
                 for point in (points[0], points[1], points[1], points[2]):
@@ -35,6 +37,10 @@ class JournalTrajectoryTest(unittest.TestCase):
             self.assertEqual(2.0, trajectory["points"][1]["x_m"])
             self.assertEqual(0.0, trajectory["points"][1]["y_m"])
             self.assertEqual(90.0, trajectory["anchor"]["start_bearing_deg"])
+            self.assertEqual((55.01, 37.01, 3),
+                             (trajectory["points"][1]["aligned_lat"],
+                              trajectory["points"][1]["aligned_lon"],
+                              trajectory["points"][1]["alignment_route_generation"]))
 
     def test_no_map_anchor_keeps_sensor_shape(self):
         points = [
