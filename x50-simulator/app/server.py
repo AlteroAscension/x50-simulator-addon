@@ -253,6 +253,8 @@ class TrajectoryStore:
                         "duration_s": data.get("duration_s"),
                         "distance_m": data.get("distance_m", 0.0),
                         "point_count": data.get("point_count", len(data.get("points", []))),
+                        "inertial_point_count": len(data.get("inertial", {}).get("points", []))
+                        if isinstance(data.get("inertial"), dict) else 0,
                         "has_anchor": bool(data.get("anchor", {}).get("has_anchor")),
                         "complete": bool(data.get("complete", False)),
                         "observed_at_ms": data.get("observed_at_ms"),

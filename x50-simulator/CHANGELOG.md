@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.8
+
+- Draw the inertial trajectory from live Navigation snapshots and completed trip journals as a separate map line.
+- Show the inertial point count in trip summaries.
+
 ## 1.11.7
 
 - Apply the FakeGPS route alignment to native Navigation trajectory snapshots as well as completed full-journal trajectories. The previous viewer only aligned full journals, which may arrive later or not at all.

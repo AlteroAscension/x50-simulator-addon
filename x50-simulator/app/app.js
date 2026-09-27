@@ -310,6 +310,13 @@ function drawSelectedTrip(fit=false){
   let alignedCount=0;
   for(const [traceIndex,trajectory] of trajectories.entries()){
     const points=trajectory.points||[];if(!points.length)continue;
+    const inertialPoints=(trajectory.inertial?.points||[]).map(point=>[Number(point.lat),Number(point.lon)])
+      .filter(position=>Number.isFinite(position[0])&&Number.isFinite(position[1]));
+    if(inertialPoints.length>1){
+      L.polyline(inertialPoints,{color:'#f59e0b',weight:5,opacity:.95,lineCap:'round',lineJoin:'round'})
+        .bindTooltip(`Инерциальная траектория · ${inertialPoints.length} точек`).addTo(tripTrajectoryLayer);
+      all.push(...inertialPoints);
+    }
     const experimental=trajectory.source==='experimental_steering_calibration';
     const rawJournal=trajectory.source==='ha_full_trip_journal';
     const navigationTrajectory=isNavigationTrajectory(trajectory);
@@ -473,6 +480,8 @@ function drawSelectedTrajectory(fit=false){
   }
   const traj=selectedTrajectoryData.trajectory;
   const pts=traj.points||[];
+  const inertialPoints=(traj.inertial?.points||[]).map(point=>[Number(point.lat),Number(point.lon)])
+    .filter(position=>Number.isFinite(position[0])&&Number.isFinite(position[1]));
   const [anchorLat,anchorLon,calcBearing]=getTrajectoryAnchor();
   const bearingToUse=$('trajectoryBearingSlider')?Number($('trajectoryBearingSlider').value):calcBearing;
   const scaleToUse=$('trajectoryScaleSlider')?Number($('trajectoryScaleSlider').value):1.0;
@@ -484,6 +493,11 @@ function drawSelectedTrajectory(fit=false){
 
   // Keep a flattened copy only for fitting the map to all fragments.
   const latlngs=[];
+  if(inertialPoints.length>1){
+    L.polyline(inertialPoints,{color:'#f59e0b',weight:5,opacity:.95,lineCap:'round',lineJoin:'round'})
+      .bindTooltip(`Инерциальная траектория · ${inertialPoints.length} точек`).addTo(trajectoryLayer);
+    latlngs.push(...inertialPoints);
+  }
 
   trajectoryAnchorMarker.setLatLng([anchorLat,anchorLon]).bindTooltip(`Точка старта траектории`).addTo(trajectoryLayer);
 
@@ -551,7 +565,8 @@ function renderTrajectoryDetail(data){
     $('trajectoryBearingSlider').value=Math.round(Number(anchor.start_bearing_deg)*2)/2;
     $('trajectoryBearingVal').textContent=`${Number(anchor.start_bearing_deg).toFixed(1)}°`;
   }
-  $('trajectoryStats').textContent=`${pts.length} точек · ${(Number(traj.distance_m)||0).toFixed(1)} м`;
+  $('trajectoryStats').textContent=`${pts.length} точек · ${(Number(traj.distance_m)||0).toFixed(1)} м`
+    + (traj.inertial?.point_count?` · инерциальных ${traj.inertial.point_count} (оранжевая линия)`:'');
 
   const rows=pts.slice(0,100).map((pt,idx)=>{
     const timeStr=pt.t_ms?new Date(pt.t_ms).toLocaleTimeString('ru-RU'):'—';
