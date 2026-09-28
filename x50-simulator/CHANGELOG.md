@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.10
+
+- Fix trip preview and original JSONL download in the Ingress diagnostics page when trips are stored by `TripLogRegistry`.
+
 ## 1.11.9
 
 - Add an Ingress diagnostics page with search, preview and original-file downloads for Simulator trips and complete or partial head-unit journals.

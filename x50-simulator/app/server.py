@@ -993,6 +993,10 @@ class TripLogRegistry:
     def detail(self, trip_id):
         return self.stores["head_unit"].detail(trip_id)
 
+    def _paths(self, trip_id):
+        # Both device journals share the same directory and file naming scheme.
+        return self.stores["head_unit"]._paths(trip_id)
+
 
 class LiveRouteHook:
     """Keeps the read-only MapKit capture agent attached to Navigator."""

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from server import SimulationEngine, preview_gzip_jsonl
+from server import SimulationEngine, TripLogRegistry, preview_gzip_jsonl
 
 
 class DiagnosticsPreviewTest(unittest.TestCase):
@@ -65,6 +65,20 @@ class DiagnosticsPreviewTest(unittest.TestCase):
                 self.assertEqual(archive, content)
                 filename, _mime, content = engine.diagnostics_download("trip", "demo")
                 self.assertEqual(trip_log, content)
+
+    def test_trip_preview_with_real_registry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            registry = TripLogRegistry(root=Path(temporary))
+            log_path, summary_path = registry._paths("demo")
+            log_path.write_text('{"kind":"sample","time_ms":2000}\n', encoding="utf-8")
+            summary_path.write_text('{"id":"demo"}', encoding="utf-8")
+            engine = SimulationEngine.__new__(SimulationEngine)
+            engine.trip_store = registry
+            preview, status = engine.diagnostics_preview("trip", "demo")
+            self.assertEqual(200, status)
+            self.assertEqual(1, preview["record_count"])
+            self.assertEqual("demo", preview["summary"]["id"])
+            self.assertEqual(log_path, engine.diagnostics_download("trip", "demo")[2])
 
 
 if __name__ == "__main__":
