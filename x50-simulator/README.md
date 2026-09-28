@@ -42,6 +42,28 @@ for the local ADB server and Gateway without exposing ADB to the whole LAN.
 
 ## Журнал поездок и GPS-коррекций
 
+Кнопка **▤** в верхней панели открывает страницу **Логи и данные поездок**.
+Там можно искать и просматривать поездки Simulator, полные и ещё загружаемые
+журналы ГУ, последние строки логов Gateway и Relay. Кнопка **Скачать** отдаёт
+исходный JSONL, `.jsonl.gz` или `.jsonl.gz.part`; для текущих логов сохраняется
+JSON-снимок. Для больших архивов предпросмотр показывает последние 120 записей,
+а выгрузка сохраняет всё содержимое. Частичный gzip читается до последней
+полной JSONL-строки и помечается как незавершённый.
+
+Аддон обращается к HA API на сервере с токеном Supervisor; токен не попадает в
+браузер. Для журналов и сообщений Gateway/Relay нужна установленная native
+интеграция Belgee X50 `0.6.5` или новее. Поездки Simulator доступны и без неё.
+
+API аддона для автоматического получения данных:
+
+```text
+GET /api/controller/diagnostics
+GET /api/controller/diagnostics/preview?kind=journal&id=<id>&partial=1
+GET /api/controller/diagnostics/download?kind=journal&id=<id>&partial=1
+GET /api/controller/diagnostics/preview?kind=trip&id=<id>
+GET /api/controller/diagnostics/preview?kind=log&id=gateway
+```
+
 Аддон начинает поездку, когда скорость автомобиля или стенда достигает
 `1 км/ч`, и автоматически завершает её через три минуты стоянки. Для коротких
 стендовых экспериментов в панели **Журнал поездок** есть кнопка ручного

@@ -6,7 +6,7 @@ from __future__ import annotations
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 from collections import deque
 import argparse
@@ -17,11 +17,13 @@ import json
 import math
 import os
 import re
+import shutil
 import socket
 import subprocess
 import threading
 import time
 import uuid
+import zlib
 
 from journal_trajectory import journal_points, journal_steering_events, trajectory_for_trip
 
@@ -70,17 +72,61 @@ def ha_request(endpoint: str, method: str = "POST", data=None, ha_url=None, ha_t
         return {"ok": False, "error": "ha_unreachable", "detail": str(error)}, 502
 
 
-def ha_journal_download(journal_id, ha_url, ha_token):
-    """Fetch a completed HA archive; keep bearer credentials out of storage."""
+def ha_journal_download(journal_id, ha_url, ha_token, partial=False):
+    """Fetch a completed or partial HA archive; keep bearer credentials server-side."""
     base = (ha_url or os.environ.get("HA_URL", "http://supervisor/core")).rstrip("/")
     token = ha_token or os.environ.get("SUPERVISOR_TOKEN", "")
-    request = Request(f"{base}/api/belgee_x50/trip-journals/{quote(journal_id, safe='')}",
+    suffix = "?partial=1" if partial else ""
+    request = Request(f"{base}/api/belgee_x50/trip-journals/{quote(journal_id, safe='')}{suffix}",
                       headers={"Authorization": f"Bearer {token}"}, method="GET")
     with urlopen(request, timeout=20) as response:
         payload = response.read(256 * 1024 * 1024 + 1)
     if len(payload) > 256 * 1024 * 1024:
         raise ValueError("trip journal exceeds size limit")
     return payload
+
+
+def preview_jsonl_lines(lines, limit=120):
+    """Keep a bounded, readable tail while counting all valid records."""
+    tail = deque(maxlen=limit)
+    counts = {}
+    first_ms = last_ms = None
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        kind = str(record.get("type") or record.get("kind") or "other")
+        counts[kind] = counts.get(kind, 0) + 1
+        stamp = record.get("time_ms")
+        if first_ms is None:
+            first_ms = stamp
+        last_ms = stamp
+        if len(line) > 24_000:
+            record = {"type": kind, "time_ms": stamp, "seq": record.get("seq"),
+                      "preview": "large_record_download_for_full_content",
+                      "bytes": len(line)}
+        tail.append(record)
+    return {"records": list(tail), "record_count": sum(counts.values()),
+            "types": counts, "first_time_ms": first_ms, "last_time_ms": last_ms}
+
+
+def preview_gzip_jsonl(payload, limit=120):
+    """Read complete JSONL records even when the gzip upload lacks its trailer."""
+    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    def complete_lines():
+        buffer = b""
+        # A final partial JSON object is intentionally ignored.
+        for offset in range(0, len(payload), 64 * 1024):
+            buffer += inflater.decompress(payload[offset:offset + 64 * 1024])
+            parts = buffer.split(b"\n")
+            buffer = parts.pop()
+            yield from parts
+    result = preview_jsonl_lines(complete_lines(), limit)
+    result["gzip_complete"] = inflater.eof
+    return result
 
 
 def clamp(value, low, high):
@@ -745,13 +791,22 @@ class TripLogStore:
             "route_generation", "route_activation_count", "route_activated_at_ms",
             "route_identity", "route_source", "exact_route_fresh",
             "exact_route_available", "exact_route_id", "exact_route_captured_ms",
-            "exact_route_producer", "fake_provider_enabled", "route_reanchor_pending")
+            "exact_route_producer", "fake_provider_enabled", "route_reanchor_pending",
+            "steering_angle_deg", "steering_fresh", "steering_age_ms", "gear_code",
+            "motion_age_ms", "motion_steering_skew_ms", "virtual_trajectory",
+            "compass")
         sample = {"kind": "sample", "time_ms": now_ms, "gps_good": self._gps_good(data),
                   "journal_source": context.get("journal_source", "gateway_direct"),
                   "device_kind": context.get("device_kind", self.device_kind)}
         for name in keys:
             if name in data:
                 sample[name] = data.get(name)
+        inertial = data.get("inertial_trajectory")
+        if isinstance(inertial, dict):
+            sample["inertial_trajectory"] = inertial
+            step = inertial.get("last_step")
+            if isinstance(step, dict):
+                sample["inertial_step"] = step
         sample["simulator"] = {name: context.get(name) for name in (
             "running", "target_speed_kmh", "gps_speed_kmh", "vehicle_speed_kmh",
             "measured_gps_speed_kmh", "odometer_km", "route_progress_m",
@@ -1533,6 +1588,82 @@ class SimulationEngine:
             return {"ok": False, "error": "invalid_ha_trajectory"}, 400
         return self.trajectory_store.save(trajectory)
 
+    def diagnostics_catalog(self):
+        journals, journal_status = ha_request(
+            "belgee_x50/trip-journals?include_partial=1", "GET",
+            ha_url=self.ha_url, ha_token=self.ha_token)
+        logs, log_status = ha_request(
+            "belgee_x50/diagnostic-logs", "GET",
+            ha_url=self.ha_url, ha_token=self.ha_token)
+        return {
+            "ok": True,
+            "trips": self.trip_store.list().get("trips", []),
+            "journals": journals.get("journals", []) if journal_status == 200 else [],
+            "log_sources": [{"source": item.get("source"),
+                             "installation_id": item.get("installation_id"),
+                             "sample_time_ms": item.get("sample_time_ms"),
+                             "line_count": len(item.get("lines") or [])}
+                            for item in logs.get("sources", [])]
+                           if log_status == 200 else [],
+            "ha_journals_available": journal_status == 200,
+            "ha_logs_available": log_status == 200,
+        }
+
+    def diagnostics_preview(self, kind, item_id, partial=False, installation_id=""):
+        if kind == "trip":
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", item_id):
+                return {"ok": False, "error": "invalid_trip_id"}, 400
+            log_path, summary_path = self.trip_store._paths(item_id)
+            if not summary_path.is_file() or not log_path.is_file():
+                return {"ok": False, "error": "trip_not_found"}, 404
+            with log_path.open("rb") as stream:
+                preview = preview_jsonl_lines(stream)
+            preview.update({"ok": True, "kind": kind, "id": item_id,
+                            "summary": json.loads(summary_path.read_text(encoding="utf-8"))})
+            return preview, 200
+        if kind == "journal":
+            if not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}", item_id):
+                return {"ok": False, "error": "invalid_journal_id"}, 400
+            try:
+                payload = ha_journal_download(item_id, self.ha_url, self.ha_token, partial)
+                preview = preview_gzip_jsonl(payload)
+            except HTTPError as error:
+                return {"ok": False, "error": "journal_not_found"}, error.code
+            except (OSError, ValueError, zlib.error) as error:
+                return {"ok": False, "error": "journal_unreadable", "detail": str(error)}, 502
+            preview.update({"ok": True, "kind": kind, "id": item_id,
+                            "partial": partial, "size_bytes": len(payload)})
+            return preview, 200
+        if kind == "log" and item_id in ("gateway", "relay"):
+            response, status = ha_request("belgee_x50/diagnostic-logs", "GET",
+                                          ha_url=self.ha_url, ha_token=self.ha_token)
+            if status != 200:
+                return {"ok": False, "error": "ha_logs_unavailable"}, 502
+            matching = [item for item in response.get("sources", [])
+                        if item.get("source") == item_id and
+                        (not installation_id or item.get("installation_id") == installation_id)]
+            return {"ok": True, "kind": kind, "id": item_id,
+                    "records": [line for item in matching for line in item.get("lines", [])],
+                    "record_count": sum(len(item.get("lines", [])) for item in matching)}, 200
+        return {"ok": False, "error": "invalid_log_source"}, 400
+
+    def diagnostics_download(self, kind, item_id, partial=False, installation_id=""):
+        if kind == "trip" and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", item_id):
+            log_path, summary_path = self.trip_store._paths(item_id)
+            if summary_path.is_file() and log_path.is_file():
+                return log_path.name, "application/x-ndjson", log_path
+        if kind == "journal" and re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}", item_id):
+            payload = ha_journal_download(item_id, self.ha_url, self.ha_token, partial)
+            filename = item_id + (".jsonl.gz.part" if partial else ".jsonl.gz")
+            return filename, "application/octet-stream", payload
+        if kind == "log" and item_id in ("gateway", "relay"):
+            preview, status = self.diagnostics_preview(kind, item_id, installation_id=installation_id)
+            if status == 200:
+                filename = item_id + "-diagnostic-logs.json"
+                return filename, "application/json", json.dumps(
+                    preview, ensure_ascii=False, indent=2).encode("utf-8")
+        raise FileNotFoundError("diagnostic_export_not_found")
+
     def trip_detail(self, trip_id):
         payload, status = self.trip_store.detail(trip_id)
         if status == 200 and payload.get("ok"):
@@ -2239,12 +2370,41 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        query = {key: values[0] for key, values in parse_qs(
+            urlsplit(self.path).query).items() if values}
         if path == "/api/controller/state":
             self.reply_json(self.engine.state())
         elif path == "/api/controller/route":
             self.reply_json(self.engine.route_state())
         elif path == "/api/controller/trace":
             self.reply_json(self.engine.trace_state())
+        elif path == "/api/controller/diagnostics":
+            self.reply_json(self.engine.diagnostics_catalog())
+        elif path == "/api/controller/diagnostics/preview":
+            payload, status = self.engine.diagnostics_preview(
+                query.get("kind", ""), query.get("id", ""),
+                query.get("partial") == "1", query.get("installation", ""))
+            self.reply_json(payload, status)
+        elif path == "/api/controller/diagnostics/download":
+            try:
+                filename, media_type, content = self.engine.diagnostics_download(
+                    query.get("kind", ""), query.get("id", ""),
+                    query.get("partial") == "1", query.get("installation", ""))
+                size = content.stat().st_size if isinstance(content, Path) else len(content)
+            except (FileNotFoundError, HTTPError, OSError, ValueError):
+                self.reply_json({"ok": False, "error": "diagnostic_export_not_found"}, 404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", media_type)
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(size))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            if isinstance(content, Path):
+                with content.open("rb") as stream:
+                    shutil.copyfileobj(stream, self.wfile)
+            else:
+                self.wfile.write(content)
         elif path == "/api/controller/trips":
             self.reply_json(self.engine.trip_store.list())
         elif path.startswith("/api/controller/trips/"):

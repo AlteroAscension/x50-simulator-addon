@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.9
+
+- Add an Ingress diagnostics page with search, preview and original-file downloads for Simulator trips and complete or partial head-unit journals.
+- Show the latest Gateway and Relay log lines delivered to the native HA integration and allow JSON export.
+
 ## 1.11.8
 
 - Draw the inertial trajectory from live Navigation snapshots and completed trip journals as a separate map line.

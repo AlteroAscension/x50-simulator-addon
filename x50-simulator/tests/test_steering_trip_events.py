@@ -9,6 +9,24 @@ from server import SimulationEngine, TrajectoryStore, TripLogStore
 
 
 class SteeringTripEventsTest(unittest.TestCase):
+    def test_live_inertial_inputs_are_saved_with_gps_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = TripLogStore(root=Path(directory), device_kind="head_unit")
+            step = {"schema": "x50.inertial-step.v1", "compass_raw_deg": 91.2,
+                    "compass_valid": True, "compass_state": "rejected",
+                    "compass_residual_deg": 24.0, "compass_allowed_deg": 5.0,
+                    "steer_deg": 12.0, "step_m": 0.8}
+            store.observe({"ok": True, "vehicle_speed_kmh": 25,
+                           "carlinkit_lat": 55.7, "carlinkit_lon": 37.5,
+                           "compass": {"valid": True, "raw_deg": 91.2},
+                           "inertial_trajectory": {"anchored": True,
+                                                   "last_step": step}},
+                          {"device_kind": "head_unit"})
+            sample = store.detail(store.active["id"])[0]["samples"][-1]
+            self.assertEqual(55.7, sample["carlinkit_lat"])
+            self.assertEqual(91.2, sample["compass"]["raw_deg"])
+            self.assertEqual(step, sample["inertial_step"])
+
     def test_journal_events_survive_native_trajectory_precedence(self):
         with tempfile.TemporaryDirectory() as directory:
             trajectories = TrajectoryStore(root=Path(directory))

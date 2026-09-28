@@ -7,7 +7,7 @@
   <title>X50 Navigation Lab</title>
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=1.11.9">
 </head>
 <body>
   <main id="map" aria-label="Карта симулятора"></main>
@@ -28,6 +28,7 @@
       </div>
       <button class="icon-button" id="fitRoute" title="Показать маршрут">⌖</button>
       <button class="icon-button trip-log-button" id="tripLogToggle" title="Журнал поездок" aria-label="Журнал поездок">≋</button>
+      <button class="icon-button" id="logsToggle" title="Логи и выгрузка" aria-label="Логи и выгрузка">▤</button>
       <button class="icon-button trajectory-button" id="trajectoryToggle" title="Виртуальные траектории (руль)" aria-label="Виртуальные траектории (руль)">⤹</button>
       <button class="icon-button" id="fullscreenToggle" title="Полноэкранный режим" aria-label="Полноэкранный режим">⛶</button>
       <button class="icon-button" id="settingsToggle" title="Настройки">⚙</button>
@@ -53,6 +54,30 @@
     <div class="segment-description" id="segmentDescription">Нажмите рядом с линией маршрута</div>
     <div class="segment-coordinates" id="segmentCoordinates">—</div>
     <details><summary>Все данные сегмента</summary><pre id="segmentJson">{}</pre></details>
+  </aside>
+
+  <aside class="logs-panel glass" id="logsPanel" aria-label="Логи и выгрузка">
+    <div class="trip-panel-heading">
+      <div><span class="eyebrow">Диагностика X50</span><h2>Логи и данные поездок</h2></div>
+      <div class="trip-panel-actions">
+        <button class="small-button" id="logsRefresh">Обновить</button>
+        <button class="icon-button" id="logsClose" title="Закрыть">×</button>
+      </div>
+    </div>
+    <p class="trip-hint">Поездки Simulator, полные и частичные журналы ГУ, последние сообщения Gateway и Relay. Для больших записей просмотр сокращён; выгрузка сохраняет оригинал.</p>
+    <div class="logs-toolbar">
+      <select id="logsKind" aria-label="Тип данных"><option value="all">Все источники</option><option value="journal">Журналы ГУ</option><option value="trip">Поездки Simulator</option><option value="log">Сообщения компонентов</option></select>
+      <input id="logsSearch" type="search" placeholder="Поиск по ID или источнику" aria-label="Поиск логов">
+      <span id="logsAvailability"></span>
+    </div>
+    <div class="logs-layout">
+      <div class="logs-list" id="logsList" role="listbox"><div class="trip-empty">Загрузка…</div></div>
+      <div class="logs-detail">
+        <div class="logs-detail-head"><strong id="logsTitle">Выберите источник</strong><a id="logsDownload" class="small-button" hidden>Скачать оригинал</a></div>
+        <div class="logs-summary" id="logsSummary">—</div>
+        <pre id="logsPreview">Записи появятся здесь.</pre>
+      </div>
+    </div>
   </aside>
 
   <aside class="trip-panel glass" id="tripPanel" aria-label="Журнал поездок">
@@ -257,6 +282,6 @@
   <div class="toast" id="toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="trip_alignment.js?v=20260926-native-route-alignment"></script>
-<script src="app.js?v=20260926-native-route-alignment"></script>
+<script src="app.js?v=1.11.9-diagnostics"></script>
 </body>
 </html>

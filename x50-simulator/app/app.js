@@ -776,3 +776,42 @@ $('clearTrajectoryFromMap').addEventListener('click',()=>{
 
 const preferences=saved();delete preferences.token;for(const [id,key] of [['vehicleScale','vehicleScale'],['odoScale','odoScale'],['gpsScale','gpsScale'],['gpsHz','gpsHz']])if(preferences[key]!=null)$(id).value=preferences[key];
 setRouteLayer(['points','line','both'].includes(preferences.routeLayer)?preferences.routeLayer:'both');setMapClickMode(preferences.mapClickMode,true);pollState().then(()=>control(calibrationPatch()).catch(()=>{}));pollRoute();setInterval(pollState,250);setInterval(pollRoute,1000);setInterval(()=>pollTrips(false),5000);setInterval(()=>pollTrajectories(false),5000);
+
+let diagnosticsItems=[],selectedDiagnostic=null;
+function diagnosticsKey(item){return [item.kind,item.id,item.partial?'partial':'complete',item.installation||''].join(':')}
+function diagnosticsQuery(item){const params=new URLSearchParams({kind:item.kind,id:item.id});if(item.partial)params.set('partial','1');if(item.installation)params.set('installation',item.installation);return params.toString()}
+function renderDiagnosticsList(){
+  const list=$('logsList'),filter=$('logsKind').value,search=$('logsSearch').value.trim().toLowerCase();list.replaceChildren();
+  const visible=diagnosticsItems.filter(item=>(filter==='all'||item.kind===filter)&&`${item.title} ${item.id} ${item.subtitle}`.toLowerCase().includes(search));
+  if(!visible.length){const empty=document.createElement('div');empty.className='trip-empty';empty.textContent='Записей по фильтру нет';list.append(empty);return}
+  for(const item of visible){const button=document.createElement('button');button.className='logs-entry'+(selectedDiagnostic&&diagnosticsKey(item)===diagnosticsKey(selectedDiagnostic)?' active':'');button.type='button';const title=document.createElement('strong'),subtitle=document.createElement('small');title.textContent=item.title;subtitle.textContent=item.subtitle;button.append(title,subtitle);button.addEventListener('click',()=>selectDiagnostic(item));list.append(button)}
+}
+async function refreshDiagnostics(){
+  $('logsAvailability').textContent='Обновление…';
+  try{
+    const data=await request('/api/controller/diagnostics');
+    diagnosticsItems=[
+      ...(data.journals||[]).map(item=>({kind:'journal',id:item.id,partial:!item.complete,title:`ГУ · ${item.id}`,subtitle:`${item.complete?'полный архив':'частичный архив'} · ${(Number(item.size_bytes||0)/1048576).toFixed(2)} МиБ`,sort:item.modified_ms||0})),
+      ...(data.trips||[]).map(item=>({kind:'trip',id:item.id,title:`Поездка · ${item.id}`,subtitle:`${item.device_kind||'неизвестно'} · ${item.samples||0} снимков${item.active?' · идёт':''}`,sort:item.started_ms||0})),
+      ...(data.log_sources||[]).map(item=>({kind:'log',id:item.source,installation:item.installation_id||'',title:`${item.source==='gateway'?'Gateway':'Relay'} · сообщения`,subtitle:`${item.installation_id||'HA'} · ${item.line_count||0} строк`,sort:item.sample_time_ms||0})),
+    ].sort((a,b)=>b.sort-a.sort);
+    $('logsAvailability').textContent=`${diagnosticsItems.length} источников${data.ha_journals_available?'':' · журналы HA недоступны'}${data.ha_logs_available?'':' · сообщения HA недоступны'}`;
+    renderDiagnosticsList();
+  }catch(error){diagnosticsItems=[];$('logsAvailability').textContent='Не удалось обновить';renderDiagnosticsList();toast(error.message,true)}
+}
+async function selectDiagnostic(item){
+  selectedDiagnostic=item;renderDiagnosticsList();$('logsTitle').textContent=item.title;$('logsSummary').textContent='Чтение…';$('logsPreview').textContent='';$('logsDownload').hidden=true;
+  try{
+    const result=await request(`/api/controller/diagnostics/preview?${diagnosticsQuery(item)}`);
+    const types=Object.entries(result.types||{}).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([name,count])=>`${name}: ${count}`).join(' · ');
+    $('logsSummary').textContent=`${result.record_count||0} записей${result.gzip_complete===false?' · архив ещё загружается':''}${types?' · '+types:''}`;
+    $('logsPreview').textContent=JSON.stringify(result.records||[],null,2);
+    $('logsDownload').href=`${API_BASE}/api/controller/diagnostics/download?${diagnosticsQuery(item)}`;
+    $('logsDownload').hidden=false;
+  }catch(error){$('logsSummary').textContent='Ошибка чтения';$('logsPreview').textContent=error.message;toast(error.message,true)}
+}
+$('logsToggle').addEventListener('click',()=>{$('tripPanel').classList.remove('open');$('trajectoryPanel').classList.remove('open');$('logsPanel').classList.add('open');refreshDiagnostics()});
+$('logsClose').addEventListener('click',()=>$('logsPanel').classList.remove('open'));
+$('logsRefresh').addEventListener('click',()=>refreshDiagnostics());
+$('logsKind').addEventListener('change',renderDiagnosticsList);
+$('logsSearch').addEventListener('input',renderDiagnosticsList);
