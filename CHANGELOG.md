@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.11
+
+- Fix trajectory `started_at_ms` fallback to first point timestamp when missing or zero in attached journals.
+
 ## 1.11.2
 
 - Retrieve the authenticated steering-trajectory snapshot from Home Assistant

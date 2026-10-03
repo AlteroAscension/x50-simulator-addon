@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.11
+
+- Fix trajectory `started_at_ms` fallback to first point timestamp when missing or zero in attached journals.
+
 ## 1.11.10
 
 - Fix trip preview and original JSONL download in the Ingress diagnostics page when trips are stored by `TripLogRegistry`.
