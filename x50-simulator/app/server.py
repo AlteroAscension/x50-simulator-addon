@@ -357,6 +357,11 @@ class TrajectoryStore:
                 continue
             trajectory = detail.get("trajectory", {})
             trace_start = finite_number(trajectory.get("started_at_ms"))
+            points = trajectory.get("points") or []
+            if points and (trace_start is None or trace_start < 1577836800000):
+                first_pt_t = finite_number(points[0].get("t_ms"))
+                if first_pt_t is not None and first_pt_t >= 1577836800000:
+                    trace_start = first_pt_t
             trace_end = finite_number(
                 trajectory.get("ended_at_ms"),
                 finite_number(trajectory.get("observed_at_ms"), trace_start),
