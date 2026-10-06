@@ -5,6 +5,10 @@
 
 Open source under the [MIT License](LICENSE).
 
+Inertial trajectory points with `segment_id` are drawn as separate fragments
+after Navigation re-anchors a missed turn. Older recordings without that field
+continue to render as a single inertial line.
+
 ### События коррекции по рулю на карте поездки
 
 В карте поездки основная голубая рулевая линия следует точкам FakeGPS.

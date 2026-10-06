@@ -29,6 +29,58 @@ def journal_points(path: Path) -> list[dict]:
     return points
 
 
+def journal_inertial_points(path: Path) -> list[dict]:
+    """Use the final revision of each recorded pose, without joining segments."""
+    revised, causal, last_revision = {}, {}, {}
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        for line in stream:
+            row = json.loads(line)
+            data = row.get("data") or {}
+            wall, elapsed = row.get("time_ms"), row.get("elapsed_ms")
+            if not all(isinstance(t, (int, float)) and math.isfinite(t) for t in (wall, elapsed)):
+                continue
+            if row.get("type") == "inertial_fusion_revision":
+                for source in data.get("points") or []:
+                    at = source.get("elapsed_ms")
+                    if not isinstance(at, (int, float)) or not math.isfinite(at):
+                        continue
+                    position = _inertial_position(source)
+                    if position is None:
+                        continue
+                    segment = source.get("segment_id", data.get("segment_id", 0))
+                    point = dict(source, t_ms=wall-elapsed+at, segment_id=segment)
+                    revised[(segment, at)] = point
+                    last_revision[segment] = max(last_revision.get(segment, at), at)
+            elif row.get("type") == "vehicle_sample":
+                step = data.get("inertial_step") or {}
+                fusion = step.get("fusion") or {}
+                source = fusion if fusion.get("anchored") else {
+                    "lat": step.get("after_lat"), "lon": step.get("after_lon"),
+                    "heading_deg": step.get("after_heading_deg"), "segment_id": step.get("segment_id", 0)}
+                if _inertial_position(source) is None:
+                    continue
+                at = step.get("elapsed_ms", elapsed)
+                if not isinstance(at, (int, float)) or not math.isfinite(at):
+                    continue
+                segment = source.get("segment_id", 0)
+                causal[(segment, int(at//1000))] = dict(source, elapsed_ms=at,
+                    t_ms=wall-elapsed+at, segment_id=segment)
+    # Dense causal points preceding a revision would redraw its old, uncorrected
+    # curve. Only append the unsolved end or segments with no revision at all.
+    points = list(revised.values())
+    points.extend(p for (segment, _), p in causal.items()
+                  if segment not in last_revision or p["elapsed_ms"] > last_revision[segment])
+    return sorted(points, key=lambda p: p["t_ms"])
+
+
+def _inertial_position(point):
+    try:
+        lat, lon = float(point["lat"]), float(point["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (lat, lon) if math.isfinite(lat) and math.isfinite(lon) and abs(lat)<=90 and abs(lon)<=180 else None
+
+
 STEERING_EVENTS = frozenset({
     "steering_overlay_fit", "steering_overlay_correction",
     "steering_overlay_applied",
@@ -143,7 +195,8 @@ def _anchor(trip, started_ms):
 
 
 def trajectory_for_trip(points: list[dict], journal_id: str, trip: dict,
-                        events: list[dict] | None = None) -> dict | None:
+                        events: list[dict] | None = None,
+                        inertial_points: list[dict] | None = None) -> dict | None:
     summary = trip.get("summary", {})
     trip_id = str(summary.get("id") or "")
     start = summary.get("started_ms")
@@ -169,7 +222,7 @@ def trajectory_for_trip(points: list[dict], journal_id: str, trip: dict,
         point["heading_deg"] = round(float(source["heading_deg"]) - float(origin["heading_deg"]), 1)
         point["segment_id"] = int(source.get("segment_id") or 0) - first_segment
         normalized.append(point)
-    return {
+    result = {
         "trajectory_schema": "x50.virtual-trajectory.v2",
         "trajectory_id": f"journal_{journal_id}_{trip_id}",
         "source": "ha_full_trip_journal",
@@ -186,4 +239,11 @@ def trajectory_for_trip(points: list[dict], journal_id: str, trip: dict,
         "points": normalized,
         "events": [event for event in (events or [])
                    if start <= event["time_ms"] <= end],
+        "journal_import_version": 2,
     }
+    selected_inertial = [dict(p) for p in (inertial_points or []) if start <= p["t_ms"] <= end]
+    if selected_inertial:
+        result["inertial"] = {"schema": "x50.inertial-trajectory.v1",
+                              "source": "recorded_journal_revisions",
+                              "point_count": len(selected_inertial), "points": selected_inertial}
+    return result

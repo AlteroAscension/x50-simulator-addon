@@ -310,12 +310,12 @@ function drawSelectedTrip(fit=false){
   let alignedCount=0;
   for(const [traceIndex,trajectory] of trajectories.entries()){
     const points=trajectory.points||[];if(!points.length)continue;
-    const inertialPoints=(trajectory.inertial?.points||[]).map(point=>[Number(point.lat),Number(point.lon)])
-      .filter(position=>Number.isFinite(position[0])&&Number.isFinite(position[1]));
-    if(inertialPoints.length>1){
-      L.polyline(inertialPoints,{color:'#f59e0b',weight:5,opacity:.95,lineCap:'round',lineJoin:'round'})
-        .bindTooltip(`Инерциальная траектория · ${inertialPoints.length} точек`).addTo(tripTrajectoryLayer);
-      all.push(...inertialPoints);
+    const inertialPoints=inertialTrajectorySegments(trajectory.inertial?.points||[]);
+    for(const segment of inertialPoints){
+      if(segment.length<2)continue;
+      L.polyline(segment,{color:'#f59e0b',weight:5,opacity:.95,lineCap:'round',lineJoin:'round'})
+        .bindTooltip(`Инерциальная траектория · ${segment.length} точек`).addTo(tripTrajectoryLayer);
+      all.push(...segment);
     }
     const experimental=trajectory.source==='experimental_steering_calibration';
     const rawJournal=trajectory.source==='ha_full_trip_journal';
@@ -443,6 +443,15 @@ function splitTrajectorySegments(projected){
   return segments;
 }
 
+// New inertial recordings start a segment on verified re-anchor; old ones
+// without segment_id remain a single line.
+function inertialTrajectorySegments(points){
+  const projected=points.filter(point=>point.lat!=null&&point.lon!=null)
+    .map(pt=>({pt,latlng:[Number(pt.lat),Number(pt.lon)]}))
+    .filter(point=>point.latlng.every(Number.isFinite));
+  return splitTrajectorySegments(projected).map(segment=>segment.map(point=>point.latlng));
+}
+
 function getTrajectoryAnchor(){
   if(trajectoryAnchorMode==='click'&&state?.selected){
     return [state.selected.lat,state.selected.lon,trajectoryBearing];
@@ -480,8 +489,7 @@ function drawSelectedTrajectory(fit=false){
   }
   const traj=selectedTrajectoryData.trajectory;
   const pts=traj.points||[];
-  const inertialPoints=(traj.inertial?.points||[]).map(point=>[Number(point.lat),Number(point.lon)])
-    .filter(position=>Number.isFinite(position[0])&&Number.isFinite(position[1]));
+  const inertialPoints=inertialTrajectorySegments(traj.inertial?.points||[]);
   const [anchorLat,anchorLon,calcBearing]=getTrajectoryAnchor();
   const bearingToUse=$('trajectoryBearingSlider')?Number($('trajectoryBearingSlider').value):calcBearing;
   const scaleToUse=$('trajectoryScaleSlider')?Number($('trajectoryScaleSlider').value):1.0;
@@ -493,10 +501,11 @@ function drawSelectedTrajectory(fit=false){
 
   // Keep a flattened copy only for fitting the map to all fragments.
   const latlngs=[];
-  if(inertialPoints.length>1){
-    L.polyline(inertialPoints,{color:'#f59e0b',weight:5,opacity:.95,lineCap:'round',lineJoin:'round'})
-      .bindTooltip(`Инерциальная траектория · ${inertialPoints.length} точек`).addTo(trajectoryLayer);
-    latlngs.push(...inertialPoints);
+  for(const segment of inertialPoints){
+    if(segment.length<2)continue;
+    L.polyline(segment,{color:'#f59e0b',weight:5,opacity:.95,lineCap:'round',lineJoin:'round'})
+      .bindTooltip(`Инерциальная траектория · ${segment.length} точек`).addTo(trajectoryLayer);
+    latlngs.push(...segment);
   }
 
   trajectoryAnchorMarker.setLatLng([anchorLat,anchorLon]).bindTooltip(`Точка старта траектории`).addTo(trajectoryLayer);

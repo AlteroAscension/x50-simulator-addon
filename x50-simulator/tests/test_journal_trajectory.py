@@ -7,10 +7,40 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(APP))
-from journal_trajectory import journal_points, journal_steering_events, trajectory_for_trip
+from journal_trajectory import journal_points, journal_steering_events, journal_inertial_points, trajectory_for_trip
 
 
 class JournalTrajectoryTest(unittest.TestCase):
+    def test_fusion_revisions_replace_old_curve_and_preserve_segments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"drive.jsonl.gz"
+            rows=[
+                {"type":"vehicle_sample","time_ms":10000,"elapsed_ms":1000,
+                 "data":{"inertial_step":{"elapsed_ms":1000,"fusion":{
+                     "anchored":True,"segment_id":1,"lat":55,"lon":37}}}},
+                {"type":"inertial_fusion_revision","time_ms":13000,"elapsed_ms":4000,
+                 "data":{"points":[{"elapsed_ms":1000,"segment_id":1,"lat":55.1,"lon":37}]}},
+                {"type":"inertial_fusion_revision","time_ms":16000,"elapsed_ms":7000,
+                 "data":{"points":[{"elapsed_ms":1000,"segment_id":1,"lat":55.2,"lon":37},
+                                     {"elapsed_ms":7000,"segment_id":1,"lat":55.3,"lon":37}]}},
+                {"type":"vehicle_sample","time_ms":17000,"elapsed_ms":8000,
+                 "data":{"inertial_step":{"elapsed_ms":8000,"fusion":{
+                     "anchored":True,"segment_id":2,"lat":56,"lon":38}}}},
+            ]
+            with gzip.open(path,"wt",encoding="utf8") as stream:
+                for row in rows:stream.write(json.dumps(row)+"\n")
+            points=journal_inertial_points(path)
+            self.assertEqual([55.2,55.3,56],[p["lat"] for p in points])
+            self.assertEqual([10000,16000,17000],[p["t_ms"] for p in points])
+            self.assertEqual([1,1,2],[p["segment_id"] for p in points])
+            virtual=[{"t_ms":10000,"x_m":0,"y_m":0,"heading_deg":0,"dist_m":0},
+                     {"t_ms":17000,"x_m":5,"y_m":0,"heading_deg":0,"dist_m":5}]
+            trip={"summary":{"id":"drive","started_ms":11000,"ended_ms":18000}}
+            trajectory=trajectory_for_trip(virtual,"journal",dict(trip,summary=dict(trip["summary"],started_ms=9000)),inertial_points=points)
+            self.assertEqual(3,trajectory["inertial"]["point_count"])
+            self.assertEqual("x50.inertial-trajectory.v1",trajectory["inertial"]["schema"])
+            self.assertEqual(2,trajectory["journal_import_version"])
+
     def test_repeated_journal_samples_and_trip_clip(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "drive.jsonl.gz"

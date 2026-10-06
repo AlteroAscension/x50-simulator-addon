@@ -84,6 +84,16 @@ class TrajectoryStoreTest(unittest.TestCase):
         matched = self.store.overlapping(1700000001000, 1700000009000)
         self.assertEqual(["trip_trace"], [item["trajectory_id"] for item in matched])
 
+    def test_completed_archive_cannot_be_replaced_by_late_active_snapshot(self):
+        completed = {"trajectory_id": "ordered", "complete": True,
+                     "observed_at_ms": 200, "points": [{"x_m": 3, "y_m": 0}]}
+        self.assertEqual(200, self.store.save(completed)[1])
+        delayed = {"trajectory_id": "ordered", "complete": False,
+                   "observed_at_ms": 300, "points": [{"x_m": 99, "y_m": 0}]}
+        self.assertFalse(self.store.needs_sync({**delayed, "snapshot_id": "ordered"}))
+        self.assertIn("ignored", self.store.save(delayed)[0])
+        self.assertEqual(3, self.store.detail("ordered")[0]["trajectory"]["points"][0]["x_m"])
+
     def test_non_overlapping_trajectory_is_not_attached_to_trip(self):
         self.store.save({
             "trajectory_id": "other_trip",

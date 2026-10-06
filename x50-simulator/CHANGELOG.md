@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.12
+
+- Import recorded inertial fusion revisions from Navigation journals, replacing old poses and preserving separate segments instead of redrawing the uncorrected curve.
+- Reimport previously cached journals with import version 2 and show inertial fragments without bridges across re-anchors.
+- Protect completed/newer HA trajectory snapshots from delayed active snapshots and duplicate downloads.
+
 ## 1.11.11
 
 - Fix trajectory `started_at_ms` fallback to first point timestamp when missing or zero in attached journals.

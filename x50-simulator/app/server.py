@@ -25,7 +25,8 @@ import time
 import uuid
 import zlib
 
-from journal_trajectory import journal_points, journal_steering_events, trajectory_for_trip
+from journal_trajectory import journal_points, journal_steering_events, journal_inertial_points, trajectory_for_trip
+from trajectory_order import snapshot_is_newer
 
 
 ROOT = Path(__file__).parent
@@ -333,12 +334,7 @@ class TrajectoryStore:
         if status != 200:
             return True
         current = detail["trajectory"]
-        return (
-            int(item.get("point_count") or 0) != len(current.get("points", []))
-            or bool(item.get("complete", False)) != bool(current.get("complete", False))
-            or int(item.get("observed_at_ms") or 0)
-            > int(current.get("observed_at_ms") or 0)
-        )
+        return snapshot_is_newer(item, current)
 
     def overlapping(self, started_ms, ended_ms, margin_ms=30_000):
         """Return locally retained steering traces overlapping one trip."""
@@ -402,6 +398,10 @@ class TrajectoryStore:
             payload["trajectory_id"] = traj_id
             target = self.root / f"trajectory-{traj_id}.json"
             tmp = self.root / f"trajectory-{traj_id}.tmp.json"
+            if "observed_at_ms" in payload:
+                existing, status = self.detail(traj_id)
+                if status == 200 and not snapshot_is_newer(payload, existing["trajectory"]):
+                    return {"ok": True, "id": traj_id, "ignored": "older_or_duplicate_snapshot"}, 200
             try:
                 with tmp.open("w", encoding="utf-8") as f:
                     json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -1831,12 +1831,12 @@ class SimulationEngine:
                     temporary.write_bytes(payload)
                     temporary.replace(path)
                 self.journal_points_cache[journal_id] = (
-                    expected_hash, journal_points(path), journal_steering_events(path))
+                    expected_hash, journal_points(path), journal_steering_events(path), journal_inertial_points(path))
             cached = self.journal_points_cache[journal_id]
-            if len(cached) < 3:
-                cached = (expected_hash, cached[1], journal_steering_events(path))
+            if len(cached) < 4:
+                cached = (expected_hash, cached[1], journal_steering_events(path), journal_inertial_points(path))
                 self.journal_points_cache[journal_id] = cached
-            points, steering_events = cached[1], cached[2]
+            points, steering_events, inertial_points = cached[1], cached[2], cached[3]
             if len(points) < 2:
                 continue
             first, last = points[0]["t_ms"], points[-1]["t_ms"]
@@ -1848,14 +1848,14 @@ class SimulationEngine:
                 if existing_path.is_file():
                     try:
                         existing = json.loads(existing_path.read_text(encoding="utf-8"))
-                        if "events" in existing:
+                        if existing.get("journal_import_version", 0) >= 2:
                             continue
                     except (OSError, ValueError):
                         pass
                 detail, trip_status = self.trip_store.detail(trip["id"])
                 if trip_status != 200:
                     continue
-                trajectory = trajectory_for_trip(points, journal_id, detail, steering_events)
+                trajectory = trajectory_for_trip(points, journal_id, detail, steering_events, inertial_points)
                 if trajectory is not None:
                     self.trajectory_store.save(trajectory)
 

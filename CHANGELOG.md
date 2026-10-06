@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.12
+
+- Import corrected inertial fusion revisions from Navigation journals and preserve segment boundaries.
+- Reimport old journal caches and protect completed snapshots against delayed HA delivery.
+
 ## 1.11.11
 
 - Fix trajectory `started_at_ms` fallback to first point timestamp when missing or zero in attached journals.
