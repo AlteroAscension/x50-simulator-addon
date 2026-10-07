@@ -701,7 +701,7 @@ $('attachTripArchive').addEventListener('click',()=>{
 $('tripArchiveFile').addEventListener('change',async event=>{
   const file=event.target.files[0],target=archiveTarget;event.target.value='';
   if(!file||archiveUploading)return;
-  if(file.size>32*1024*1024){toast('Архив должен быть не больше 32 МБ',true);return}
+  if(file.size>128*1024*1024){toast('Архив должен быть не больше 128 МБ',true);return}
   archiveUploading=true;$('createTripArchive').disabled=true;$('attachTripArchive').disabled=true;
   $('tripArchiveStatus').textContent='Загрузка и проверка архива…';
   try{

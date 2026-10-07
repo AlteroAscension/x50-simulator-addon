@@ -6,8 +6,8 @@ import json
 import math
 import re
 
-MAX_UPLOAD = 32 * 1024 * 1024
-MAX_EXPANDED = 256 * 1024 * 1024
+MAX_UPLOAD = 128 * 1024 * 1024
+MAX_EXPANDED = 1024 * 1024 * 1024
 
 
 def number(value):
@@ -16,7 +16,7 @@ def number(value):
 
 def parse_archive(payload):
     if not payload or len(payload) > MAX_UPLOAD:
-        raise ValueError("Архив пустой или превышает 32 МБ")
+        raise ValueError("Архив пустой или превышает 128 МБ")
     samples, routes, switches, events = {}, {}, [], []
     start = end = journal_id = None
     ended_complete = False
@@ -30,7 +30,7 @@ def parse_archive(payload):
                     break
                 expanded += len(line)
                 rows += 1
-                if len(line) > 2 * 1024 * 1024 or expanded > MAX_EXPANDED or rows > 300_000:
+                if len(line) > 2 * 1024 * 1024 or expanded > MAX_EXPANDED or rows > 1_000_000:
                     raise ValueError("Слишком большой распакованный журнал")
                 row = json.loads(line)
                 if not isinstance(row, dict):

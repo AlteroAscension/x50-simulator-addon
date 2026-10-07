@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.14
+
+- Increase trip archive upload limit to 128 MiB in both the browser and server, allowing recordings larger than 32 MiB.
+- Stream journals up to 1 GiB decompressed and one million records while retaining per-record and corruption checks.
+- Verify binary HTTP import with a synthetic archive larger than 37 MiB.
+
 ## 1.11.13
 
 - Upload Navigation `.jsonl.gz` archives in the trip drawer to create a trip without live telemetry or enrich an existing trip.

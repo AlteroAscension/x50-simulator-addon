@@ -2536,7 +2536,7 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if length <= 0 or length > MAX_UPLOAD:
-                    self.reply_json({"ok": False, "error": "Архив должен быть не больше 32 МБ"}, 413)
+                    self.reply_json({"ok": False, "error": "Архив должен быть не больше 128 МБ"}, 413)
                     return
                 target = parse_qs(urlsplit(self.path).query).get("trip_id", [None])[0]
                 payload, status = self.engine.import_trip_archive(self.rfile.read(length), target)

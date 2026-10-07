@@ -136,6 +136,29 @@ class ArchiveImportTest(unittest.TestCase):
         finally:
             http.shutdown(); http.server_close(); thread.join()
 
+    def test_http_archive_larger_than_37_mib(self):
+        # Uncompressed gzip blocks make the request genuinely large, without
+        # storing private trip data or millions of samples in the test suite.
+        padding = json.dumps(dict(type="application_log", time_ms=START,
+                                  data={"message": "x" * (1024 * 1024)})).encode() + b"\n"
+        raw = gzip.compress(gzip.decompress(archive()) + padding * 37, compresslevel=0)
+        self.assertGreater(len(raw), 37 * 1024 * 1024)
+        class Handler(server.Handler):
+            engine = self.engine
+            def log_message(self, *_): pass
+        http = server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=http.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{http.server_port}/api/controller/trips/import"
+            with urlopen(Request(url, data=raw, headers={"Content-Type": "application/gzip"}), timeout=30) as response:
+                result = json.load(response)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["samples"], 4)
+                self.assertEqual(result["inertial_points"], 2)
+        finally:
+            http.shutdown(); http.server_close(); thread.join()
+
 
 if __name__ == "__main__":
     unittest.main()
