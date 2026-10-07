@@ -54,6 +54,41 @@ class ReferenceTest(unittest.TestCase):
         self.assertEqual(self.engine.trip_reference(self.trip_id,[])[1],400)
         self.assertEqual(self.engine.trip_reference('../secret')[1],400)
 
+    def test_flags_persist_without_changing_original_evidence(self):
+        ref=create_reference({'summary':{'id':'flags'},'trajectories':[{'inertial':{'points':[
+            {'t_ms':1000+i*1000,'lat':1+i*.0001,'lon':2} for i in range(4)]}}]})
+        store=ReferenceStore(Path(self.temp.name))
+        edit=copy.deepcopy(ref)
+        edit['nodes'][0]['locked']=True
+        edit['nodes'][-1]['excluded']=True
+        edit['nodes'][1]['cut_before']=True
+        saved=store.save(ref,edit)
+        loaded=store.load('flags')
+        self.assertEqual(loaded,saved)
+        self.assertTrue(loaded['nodes'][0]['locked'])
+        self.assertTrue(loaded['nodes'][-1]['excluded'])
+        self.assertTrue(loaded['nodes'][1]['cut_before'])
+        self.assertEqual(loaded['source_sha256'],ref['source_sha256'])
+        for before,after in zip(ref['nodes'],loaded['nodes']):
+            for key in ('id','t_ms','evidence','rest_m','break_before','original_lat','original_lon'):
+                self.assertEqual(before[key],after[key])
+        # Older coordinate-only clients preserve the flags.
+        patch=dict(saved,nodes=[{key:n[key] for key in ('id','lat','lon')} for n in saved['nodes']])
+        again=store.save(ref,patch)
+        self.assertTrue(again['nodes'][0]['locked'])
+
+    def test_flags_validation_and_saved_only_does_not_generate_draft(self):
+        self.assertEqual(self.engine.trip_reference(self.trip_id,saved_only=True),({'saved':False,'nodes':[]},200))
+        ref,_=self.engine.trip_reference(self.trip_id)
+        for flag in ('locked','excluded','cut_before'):
+            bad=copy.deepcopy(ref);bad['nodes'][0][flag]='yes'
+            self.assertEqual(self.engine.trip_reference(self.trip_id,bad)[1],400)
+        bad=copy.deepcopy(ref)
+        for n in bad['nodes']:n['excluded']=True
+        self.assertEqual(self.engine.trip_reference(self.trip_id,bad)[1],400)
+        bad=copy.deepcopy(ref);bad['nodes'][0].update(locked=True,excluded=True)
+        self.assertEqual(self.engine.trip_reference(self.trip_id,bad)[1],400)
+
     def test_jump_is_not_physical_length(self):
         trip={'summary':{'id':'test'},'samples':[], 'trajectories':[{'inertial':{'points':[
             {'t_ms':1000,'lat':1,'lon':2,'segment_id':0},
@@ -74,10 +109,14 @@ class ReferenceTest(unittest.TestCase):
         thread=threading.Thread(target=http.serve_forever,daemon=True);thread.start()
         url=f'http://127.0.0.1:{http.server_port}/api/controller/trips/{self.trip_id}/reference'
         try:
+            with urlopen(url+'?saved_only=1') as response:
+                self.assertEqual(json.load(response),{'saved':False,'nodes':[]})
             with urlopen(url) as response:ref=json.load(response)
             with urlopen(Request(url,data=json.dumps(ref).encode(),headers={'Content-Type':'application/json'})) as response:
                 saved=json.load(response)
             self.assertEqual(saved['revision'],1)
+            with urlopen(url+'?saved_only=1') as response:
+                self.assertEqual(json.load(response),saved)
             with self.assertRaises(HTTPError) as error:
                 urlopen(Request(url,data=json.dumps(ref).encode()))
             self.assertEqual(error.exception.code,409)

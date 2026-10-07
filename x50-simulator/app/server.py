@@ -1686,12 +1686,14 @@ class SimulationEngine:
                 and covered_by_native(item) and item.get("events")]
         return payload, status
 
-    def trip_reference(self, trip_id, patch=None):
+    def trip_reference(self, trip_id, patch=None, saved_only=False):
         try:
             store = ReferenceStore(self.trip_store.stores['head_unit'].root)
             # Share the trip lock across Handler threads for revision checks.
             with self.trip_store.stores['head_unit'].lock:
                 reference = store.load(trip_id)
+                if reference is None and saved_only:
+                    return {'saved': False, 'nodes': []}, 200
                 if reference is None:
                     trip, status = self.trip_detail(trip_id)
                     if status != 200:
@@ -2508,7 +2510,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif path == "/api/controller/trips":
             self.reply_json(self.engine.trip_store.list())
         elif path.startswith('/api/controller/trips/') and path.endswith('/reference'):
-            payload, status = self.engine.trip_reference(path.split('/')[-2])
+            payload, status = self.engine.trip_reference(path.split('/')[-2], saved_only=query.get('saved_only') == '1')
             self.reply_json(payload, status)
         elif path.startswith("/api/controller/trips/"):
             trip_id = path.rsplit("/", 1)[-1]

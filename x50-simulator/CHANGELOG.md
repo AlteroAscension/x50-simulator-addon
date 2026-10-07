@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.11.20
+
+- Keep the original inertial trajectory visible while editing; add time-aligned dashed links to original inertial nodes alongside GPS and FakeGPS.
+- Save node locks and preserve their exact positions during rope edits. Solve free links between locks with FABRIK; reject impossible movements without partial changes.
+- Add manual breaks, inclusive range removal and range restoration. Preserve excluded measurements and original evidence; do not connect the reference across removed sections.
+- Display the saved reference as a magenta trajectory when viewing a trip, including after exiting the editor. Read saved references without generating a draft for every trip view.
+- Add Esri World Imagery satellite basemap with attribution and persistent source selection.
+
 ## 1.11.19
 
 - Create and explicitly save a per-trip manual reference trajectory from recorded inertial nodes; resume editing after restarting the add-on. Original trip data and sensor evidence remain immutable.

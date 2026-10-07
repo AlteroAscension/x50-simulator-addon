@@ -124,8 +124,16 @@ class ReferenceStore:
                 lat,lon = edit.get('lat'),edit.get('lon')
                 if not number(lat) or not number(lon) or abs(lat)>89 or abs(lon)>180:
                     raise ValueError('Некорректные координаты')
+                flags = {key: edit.get(key, original.get(key, False))
+                         for key in ('locked', 'excluded', 'cut_before')}
+                if any(type(value) is not bool for value in flags.values()):
+                    raise ValueError('Замок, исключение и разрыв должны быть true/false')
+                if flags['locked'] and flags['excluded']:
+                    raise ValueError('Снимите замки перед удалением диапазона')
                 # Original virtual breaks are immutable evidence boundaries.
-                updated['nodes'].append(dict(original,lat=lat,lon=lon))
+                updated['nodes'].append(dict(original,lat=lat,lon=lon,**flags))
+            if sum(not n['excluded'] for n in updated['nodes']) < 2:
+                raise ValueError('Оставьте не менее двух узлов референса')
             updated.update(revision=current['revision']+1,saved=True,updated_ms=int(time.time()*1000))
             path = self.path(base['trip_id'])
             temporary = path.with_suffix('.json.tmp')

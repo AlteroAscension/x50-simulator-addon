@@ -281,6 +281,7 @@ function renderTripRouteTimeline(data){
   $('tripRouteTimeline').innerHTML=intervals.map((item,index)=>`${index?'<div class="trip-route-switch-icon">→</div>':''}<div class="trip-route-item" style="--route-color:${tripRouteColors[index%tripRouteColors.length]}"><b>Маршрут ${index+1}</b><span>${tripTime(item.start)} → ${tripTime(item.end)}</span><small>${item.route.route_source||'unknown'} · ${metric(Number(item.route.length_m)/1000,2,' км')} · ${item.route.point_count||item.route.points?.length||0} точек</small></div>`).join('');
 }
 function drawSelectedTrip(fit=false){
+  referenceEditor.view(selectedTripData);
   tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();tripTrajectoryLayer.clearLayers();
   const samples=selectedTripData?.samples||[],events=selectedTripData?.events||[],routeIntervals=tripRouteIntervals(selectedTripData),trajectories=[...(selectedTripData?.trajectories||[]),...(selectedTripData?.trajectory_event_overlays||[])].sort((a,b)=>Number(a.source==='experimental_steering_calibration')-Number(b.source==='experimental_steering_calibration'));
   const realSegments=splitTripTrack(samples,'carlinkit_lat','carlinkit_lon'),fakeSegments=splitTripTrack(samples,'fake_lat','fake_lon');
@@ -395,7 +396,7 @@ function drawSelectedTrip(fit=false){
   $('showTripOnMap').disabled=all.length<2;$('clearTripFromMap').disabled=all.length<2;
   if(fit&&all.length>1){map.fitBounds(L.latLngBounds(all),{padding:[70,70]});$('tripPanel').classList.remove('open')}
 }
-function clearTripTrack(){if(referenceEditor.active&&!referenceEditor.close())return;tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();tripTrajectoryLayer.clearLayers();$('clearTripFromMap').disabled=true;$('tripTrackStats').textContent='Трек скрыт'}
+function clearTripTrack(){if(referenceEditor.active&&!referenceEditor.close())return;referenceEditor.clear();tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();tripTrajectoryLayer.clearLayers();$('clearTripFromMap').disabled=true;$('tripTrackStats').textContent='Трек скрыт'}
 function renderTripDetail(data){
   const trip=data.summary||{},events=data.events||[],samples=data.samples||[],routes=data.routes||[],switches=data.route_switches||[];
   const device=tripDevice(trip);

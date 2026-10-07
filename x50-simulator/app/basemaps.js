@@ -2,6 +2,7 @@
   const osm='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
   const carto=osm+' &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>';
   const sources={
+    satellite:{label:'Спутник — Esri World Imagery',url:'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',maxNativeZoom:19,attribution:'Tiles &copy; <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noopener noreferrer">Esri</a> · Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community'},
     osm:{label:'OpenStreetMap',url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',maxNativeZoom:19,attribution:osm},
     hot:{label:'OSM France — HOT',url:'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',subdomains:'abc',maxNativeZoom:19,attribution:osm+' · <a href="https://www.hotosm.org/" target="_blank" rel="noopener noreferrer">HOT</a> · <a href="https://www.openstreetmap.fr/" target="_blank" rel="noopener noreferrer">OSM France</a>'},
     voyager:{label:'CARTO — цветная',url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',subdomains:'abcd',maxNativeZoom:20,attribution:carto},
