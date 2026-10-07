@@ -6,8 +6,11 @@ const getApiBase = () => {
   return path;
 };
 const API_BASE = getApiBase();
-const map = L.map('map', {zoomControl:false, attributionControl:false}).setView([55.751244,37.618423], 12);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:20, subdomains:'abcd'}).addTo(map);
+const map = L.map('map', {zoomControl:false, attributionControl:true}).setView([55.751244,37.618423], 12);
+map.attributionControl.setPrefix(false);
+document.body.appendChild(map.attributionControl.getContainer());
+let mapStorage=null;try{mapStorage=window.localStorage}catch{}
+const basemaps=X50Basemaps.create({map,leaflet:L,select:$('mapSource'),status:$('mapSourceStatus'),storage:mapStorage});
 
 const icons = type => L.divIcon({className:`sim-marker ${type}`,html:'<div></div>',iconSize:[22,22],iconAnchor:[11,11]});
 const routeLine = L.polyline([], {color:'#36caff',weight:6,opacity:.8,lineCap:'round'}).addTo(map);

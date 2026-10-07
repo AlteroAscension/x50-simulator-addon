@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.11.17
+
+- Choose OpenStreetMap, OSM France HOT, or CARTO Voyager/Light/Dark in settings; default to OpenStreetMap instead of relying on one CARTO endpoint.
+- Remember the selected map source in the browser and switch only the basemap, preserving routes, trajectories and viewport.
+- Restore visible provider attribution and show tile-loading errors with a prompt to choose another source.
+- Refresh JavaScript/CSS cache versions so updated controls load after upgrading the add-on.
+
 ## 1.11.16
 
 - Import completed uploads directly from disk rather than loading the entire compressed archive into RAM.
