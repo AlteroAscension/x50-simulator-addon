@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.11.13
+
+- Upload Navigation `.jsonl.gz` archives in the trip drawer to create a trip without live telemetry or enrich an existing trip.
+- Restore recorded route geometry and switches, GPS/FakeGPS measurements, raw steering and revised inertial trajectories, including inertial-only recordings.
+- Reject incompatible attachments using time overlap, device type, odometer and usable GPS fixes. Preserve original live logs and prevent duplicate imports or replacing a complete archive with a partial one.
+- Bound compressed/decompressed upload sizes and reject corrupt archives; show imported layer counts and missing completion records.
+
 ## 1.11.12
 
 - Import recorded inertial fusion revisions from Navigation journals, replacing old poses and preserving separate segments instead of redrawing the uncorrected curve.

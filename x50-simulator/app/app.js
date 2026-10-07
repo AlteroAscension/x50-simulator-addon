@@ -309,7 +309,7 @@ function drawSelectedTrip(fit=false){
   let fragmentCount=0,rawLineVisibleCount=0;
   let alignedCount=0;
   for(const [traceIndex,trajectory] of trajectories.entries()){
-    const points=trajectory.points||[];if(!points.length)continue;
+    const points=trajectory.points||[];
     const inertialPoints=inertialTrajectorySegments(trajectory.inertial?.points||[]);
     for(const segment of inertialPoints){
       if(segment.length<2)continue;
@@ -317,6 +317,7 @@ function drawSelectedTrip(fit=false){
         .bindTooltip(`Инерциальная траектория · ${segment.length} точек`).addTo(tripTrajectoryLayer);
       all.push(...segment);
     }
+    if(!points.length)continue;
     const experimental=trajectory.source==='experimental_steering_calibration';
     const rawJournal=trajectory.source==='ha_full_trip_journal';
     const navigationTrajectory=isNavigationTrajectory(trajectory);
@@ -691,6 +692,28 @@ $('tripRouteToggle').addEventListener('click',()=>{tripShowRoutes=!tripShowRoute
 $('tripRawSteeringToggle').addEventListener('click',()=>{tripShowRawSteering=!tripShowRawSteering;$('tripRawSteeringToggle').classList.toggle('active',tripShowRawSteering);$('tripRawSteeringToggle').setAttribute('aria-pressed',String(tripShowRawSteering));drawSelectedTrip(false)});
 $('liveRouteToggle').addEventListener('click',()=>setLiveRouteVisible(!liveRouteVisible));
 $('finishTrip').addEventListener('click',async()=>{try{await request('/api/controller/trips/finish',{method:'POST',body:'{}'});selectedTripId=null;await pollTrips(true);toast('Поездка завершена')}catch(error){toast(error.message,true)}});
+let archiveTarget=null,archiveUploading=false;
+$('createTripArchive').addEventListener('click',()=>{archiveTarget=null;$('tripArchiveFile').click()});
+$('attachTripArchive').addEventListener('click',()=>{
+  if(!selectedTripId){toast('Сначала выберите поездку',true);return}
+  archiveTarget=selectedTripId;$('tripArchiveFile').click();
+});
+$('tripArchiveFile').addEventListener('change',async event=>{
+  const file=event.target.files[0],target=archiveTarget;event.target.value='';
+  if(!file||archiveUploading)return;
+  if(file.size>32*1024*1024){toast('Архив должен быть не больше 32 МБ',true);return}
+  archiveUploading=true;$('createTripArchive').disabled=true;$('attachTripArchive').disabled=true;
+  $('tripArchiveStatus').textContent='Загрузка и проверка архива…';
+  try{
+    const suffix=target?`?trip_id=${encodeURIComponent(target)}`:'';
+    const result=await request(`/api/controller/trips/import${suffix}`,{method:'POST',headers:{'Content-Type':'application/gzip','X-X50-Client':'navigation-lab'},body:file});
+    selectedTripId=result.trip_id;await pollTrips(true);
+    $('tripArchiveStatus').textContent=result.already_imported?'Этот архив уже загружен.':
+      `Архив добавлен: маршрутов ${result.routes}, измерений ${result.samples}, точек руля ${result.steering_points}, инерциальных ${result.inertial_points}.${result.complete?'':' В архиве нет записи завершения.'}`;
+    toast(target?'Архив добавлен к поездке':'Поездка открыта из архива');
+  }catch(error){$('tripArchiveStatus').textContent=error.message;toast(error.message,true)}
+  finally{archiveUploading=false;$('createTripArchive').disabled=false;$('attachTripArchive').disabled=false}
+});
 $('settingsToggle').addEventListener('click',()=>$('settingsPanel').classList.toggle('open'));
 $('settingsClose').addEventListener('click',()=>$('settingsPanel').classList.remove('open'));
 document.querySelectorAll('#routeLayers button').forEach(button=>button.addEventListener('click',()=>setRouteLayer(button.dataset.layer)));

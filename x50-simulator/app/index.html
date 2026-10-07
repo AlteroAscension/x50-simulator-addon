@@ -89,6 +89,12 @@
       </div>
     </div>
     <p class="trip-hint">Снимки пишутся раз в секунду. Отдельно фиксируются коррекции прогресса и возврат GPS после разрыва.</p>
+    <div class="trip-panel-actions">
+      <button class="small-button" id="createTripArchive">Создать из архива</button>
+      <button class="small-button" id="attachTripArchive">Добавить архив к выбранной</button>
+      <input type="file" id="tripArchiveFile" accept=".jsonl.gz,.gz" hidden>
+    </div>
+    <p class="trip-hint" id="tripArchiveStatus" role="status">Архив Navigation (.jsonl.gz). При добавлении проверяются время, одометр и тип устройства.</p>
     <div class="trip-layout">
       <div class="trip-list" id="tripList"><div class="trip-empty">Поездки появятся после начала движения</div></div>
       <div class="trip-detail" id="tripDetail">

@@ -24,9 +24,11 @@ import threading
 import time
 import uuid
 import zlib
+import tempfile
 
 from journal_trajectory import journal_points, journal_steering_events, journal_inertial_points, trajectory_for_trip
 from trajectory_order import snapshot_is_newer
+from archive_import import MAX_UPLOAD, parse_archive, validate_match
 
 
 ROOT = Path(__file__).parent
@@ -940,6 +942,16 @@ class TripLogStore:
                 elif record.get("kind") == "route_switch":
                     route_switches.append(record)
         route_switches.sort(key=lambda item: item.get("time_ms", 0))
+        archive_path = self.root / (trip_id + ".archive.json")
+        if archive_path.is_file():
+            archive = json.loads(archive_path.read_text(encoding="utf-8"))
+            # Archive measurements take priority; retain live-only observations.
+            merged = {int(s["time_ms"] // 1000): s for s in samples}
+            merged.update({int(s["time_ms"] // 1000): s for s in archive["samples"]})
+            samples = sorted(merged.values(), key=lambda s: s["time_ms"])
+            events += archive["events"]
+            routes = archive["routes"] or routes
+            route_switches = archive["route_switches"] or route_switches
         return {"ok": True, "summary": summary, "samples": samples, "events": events,
                 "routes": routes, "route_switches": route_switches}, 200
 
@@ -1679,10 +1691,14 @@ class SimulationEngine:
             summary = payload.get("summary", {})
             trajectories = self.trajectory_store.overlapping(
                 summary.get("started_ms"), summary.get("ended_ms"))
+            trajectories = [t for t in trajectories if not t.get("manual_import")
+                            or t.get("matched_trip_id") == trip_id]
             native = [item for item in trajectories if item.get("complete")
                       and item.get("source") not in
                       ("ha_full_trip_journal", "experimental_steering_calibration")]
             def covered_by_native(journal):
+                if journal.get("manual_import"):
+                    return False
                 start = finite_number(journal.get("started_at_ms"))
                 end = finite_number(journal.get("ended_at_ms"))
                 if start is None or end is None or end <= start:
@@ -1700,6 +1716,74 @@ class SimulationEngine:
                 if item.get("source") == "ha_full_trip_journal"
                 and covered_by_native(item) and item.get("events")]
         return payload, status
+
+    def import_trip_archive(self, raw, target_id=None):
+        """Import without touching the live journal or simulation engine."""
+        try:
+            archive = parse_archive(raw)
+            journal_id = archive["summary"]["source_journal_id"]
+            store = self.trip_store.stores["head_unit"]
+            with store.lock, self.trip_store.stores["avd"].lock:
+                if not target_id:
+                    for item in self.trip_store.list()["trips"]:
+                        if item.get("source_journal_id") == journal_id:
+                            target_id = item["id"]
+                            break
+                trip_id = target_id or archive["summary"]["id"]
+                existing, status = self.trip_store.detail(trip_id)
+                if status == 200 and existing["summary"].get("archive_sha256") == archive["summary"]["archive_sha256"]:
+                    return {"ok": True, "trip_id": trip_id, "already_imported": True}, 200
+                if target_id:
+                    if status != 200:
+                        return existing, status
+                    validate_match(existing, archive)
+                elif status == 200:
+                    validate_match(existing, archive)
+                if status == 200 and existing["summary"].get("source_journal_id") not in (None, journal_id):
+                    raise ValueError("К поездке уже прикреплён другой архив")
+                if status == 200 and existing["summary"].get("archive_complete") and not archive["summary"]["archive_complete"]:
+                    raise ValueError("Неполный архив не может заменить уже загруженный полный")
+                with tempfile.TemporaryDirectory() as temporary:
+                    path = Path(temporary) / "journal.jsonl.gz"
+                    path.write_bytes(raw)
+                    archive["summary"]["id"] = trip_id
+                    inertial = journal_inertial_points(path)
+                    trace = trajectory_for_trip(journal_points(path), journal_id, archive,
+                                                journal_steering_events(path), inertial)
+                    if trace is None and inertial:
+                        trace = dict(trajectory_id=f"journal_{journal_id}_{trip_id}",
+                            source="ha_full_trip_journal", matched_trip_id=trip_id,
+                            source_journal_id=journal_id, points=[], point_count=0,
+                            started_at_ms=archive["summary"]["started_ms"],
+                            ended_at_ms=archive["summary"]["ended_ms"],
+                            complete=archive["summary"]["archive_complete"], anchor={"has_anchor": False},
+                            inertial={"schema": "x50.inertial-trajectory.v1", "points": inertial,
+                                      "point_count": len(inertial)})
+                    if trace:
+                        trace["complete"] = archive["summary"]["archive_complete"]
+                        trace["manual_import"] = True
+                        saved, trace_status = self.trajectory_store.save(trace)
+                        if trace_status != 200:
+                            return saved, trace_status
+                if status == 200:
+                    summary = dict(existing["summary"])
+                    summary.update({k: archive["summary"][k] for k in
+                                    ("source_journal_id", "archive_sha256", "archive_complete")})
+                else:
+                    summary = archive["summary"]
+                # Keep the original live log intact. Both files use atomic replacement.
+                store._atomic_json(store.root / (trip_id + ".archive.json"), archive)
+                store._atomic_json(store._paths(trip_id)[1], summary)
+                cache = self.journal_dir / (journal_id + ".jsonl.gz")
+                temporary = cache.with_suffix(".upload.tmp")
+                temporary.write_bytes(raw)
+                temporary.replace(cache)
+                return {"ok": True, "trip_id": trip_id, "routes": len(archive["routes"]),
+                        "samples": len(archive["samples"]), "steering_points": trace["point_count"] if trace else 0,
+                        "inertial_points": (trace or {}).get("inertial", {}).get("point_count", 0),
+                        "complete": archive["summary"]["archive_complete"]}, 200
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            return {"ok": False, "error": str(error)}, 400
 
     def reload_route(self, requested_source="mapkit"):
         if requested_source != "mapkit":
@@ -2448,6 +2532,17 @@ class Handler(SimpleHTTPRequestHandler):
             self.reply_json(payload, status)
         elif path == "/api/controller/trips/finish":
             self.reply_json(self.engine.trip_store.finish("manual"))
+        elif path == "/api/controller/trips/import":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0 or length > MAX_UPLOAD:
+                    self.reply_json({"ok": False, "error": "Архив должен быть не больше 32 МБ"}, 413)
+                    return
+                target = parse_qs(urlsplit(self.path).query).get("trip_id", [None])[0]
+                payload, status = self.engine.import_trip_archive(self.rfile.read(length), target)
+                self.reply_json(payload, status)
+            except ValueError:
+                self.reply_json({"ok": False, "error": "Некорректная длина запроса"}, 400)
         elif path == "/api/controller/trajectories/upload":
             payload, status = self.engine.trajectory_store.save(self.read_json())
             self.reply_json(payload, status)
