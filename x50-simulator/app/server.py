@@ -28,6 +28,7 @@ import tempfile
 
 from journal_trajectory import journal_points, journal_steering_events, journal_inertial_points, trajectory_for_trip
 from trajectory_order import snapshot_is_newer
+from reference_trajectory import ReferenceStore, create_reference
 from archive_import import MAX_UPLOAD, CHUNK_SIZE, ARCHIVE_SAMPLE_KEYS, ArchiveUploads, archive_hash, parse_archive, validate_match
 
 
@@ -36,6 +37,7 @@ GATEWAY = os.environ.get("X50_GATEWAY_URL", "http://127.0.0.1:8080")
 STATIC_FILES = {"/": "index.html", "/index.html": "index.html",
                 "/app.js": "app.js", "/trip_alignment.js": "trip_alignment.js",
                 "/basemaps.js": "basemaps.js",
+                "/reference_editor.js": "reference_editor.js",
                 "/styles.css": "styles.css"}
 
 
@@ -1684,6 +1686,27 @@ class SimulationEngine:
                 and covered_by_native(item) and item.get("events")]
         return payload, status
 
+    def trip_reference(self, trip_id, patch=None):
+        try:
+            store = ReferenceStore(self.trip_store.stores['head_unit'].root)
+            # Share the trip lock across Handler threads for revision checks.
+            with self.trip_store.stores['head_unit'].lock:
+                reference = store.load(trip_id)
+                if reference is None:
+                    trip, status = self.trip_detail(trip_id)
+                    if status != 200:
+                        return trip, status
+                    if trip['summary'].get('active'):
+                        raise ValueError('Завершите поездку перед созданием референса')
+                    reference = create_reference(trip)
+                if patch is not None:
+                    reference = store.save(reference, patch)
+                return reference, 200
+        except FileExistsError as error:
+            return {'error': str(error)}, 409
+        except (ValueError, TypeError, KeyError) as error:
+            return {'error': str(error)}, 400
+
     def import_trip_archive(self, raw, target_id=None):
         """Import without touching the live journal or simulation engine."""
         try:
@@ -2484,6 +2507,9 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(content)
         elif path == "/api/controller/trips":
             self.reply_json(self.engine.trip_store.list())
+        elif path.startswith('/api/controller/trips/') and path.endswith('/reference'):
+            payload, status = self.engine.trip_reference(path.split('/')[-2])
+            self.reply_json(payload, status)
         elif path.startswith("/api/controller/trips/"):
             trip_id = path.rsplit("/", 1)[-1]
             payload, status = self.engine.trip_detail(trip_id)
@@ -2501,7 +2527,20 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlsplit(self.path).path
-        if path == "/api/controller/control":
+        if path.startswith('/api/controller/trips/') and path.endswith('/reference'):
+            try:
+                length = int(self.headers.get('Content-Length','0'))
+                if length<=0 or length>8*1024*1024:
+                    self.reply_json({'error':'Размер референса превышает 8 МБ'},413)
+                    return
+                patch = self.read_json()
+                if not isinstance(patch,dict):
+                    raise ValueError('Ожидается JSON-объект')
+                payload, status = self.engine.trip_reference(path.split('/')[-2], patch)
+                self.reply_json(payload,status)
+            except (ValueError,TypeError) as error:
+                self.reply_json({'error':str(error)},400)
+        elif path == "/api/controller/control":
             try:
                 self.reply_json(self.engine.update(self.read_json()))
             except (ValueError, TypeError, KeyError) as error:

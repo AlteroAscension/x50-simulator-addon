@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.11.19
+
+- Create and explicitly save a per-trip manual reference trajectory from recorded inertial nodes; resume editing after restarting the add-on. Original trip data and sensor evidence remain immutable.
+- Drag nodes with a length-preserving rope inside each fragment, inspect time-aligned GPS/FakeGPS links and sensor consistency colours, undo edits and align fragment boundaries without counting their gap as traveled distance.
+- Export the reference with wall times, provenance and measurements for offline model evaluation. Guard unsaved edits and conflicting saves from multiple tabs.
+- Render reference nodes on a separate canvas pane and disable map GPS commands while editing.
+
 ## 1.11.18
 
 - Serve `basemaps.js` through the add-on's static-file allowlist, fixing the 404/MIME error and `X50Basemaps is not defined` in HA Ingress.

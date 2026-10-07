@@ -33,6 +33,7 @@ let selectedMarker, rawMarker, sentMarker, state=null, routeRevision=null,mapkit
 let mapClickMode='gps',currentRoutePoints=[],currentMapkitData={},inspectedSegmentIndex=null,hasAutoFittedRoute=false,userAdjustedMap=false;
 let tripsBusy=false,selectedTripId=null,lastTripSignature='',selectedTripData=null,tripTrackMode='both',tripShowRoutes=true,tripShowRawSteering=false,liveRouteVisible=true;
 let trajectoriesBusy=false,selectedTrajectoryId=null,lastTrajectorySignature='',selectedTrajectoryData=null,trajectoryAnchorMode='route',trajectoryBearing=0.0,trajectorySteerScale=1.0;
+const referenceEditor=X50Reference.create({map,L,request,trip:()=>selectedTripData,toast,background:tripTrajectoryLayer});
 const tripRouteColors=['#a977ff','#3bd6ff','#ff6fae','#ffe06b','#66e0bd','#ff916b','#79a7ff','#d9f06b'];
 
 function toast(message, error=false){const el=$('toast');el.textContent=message;el.style.borderColor=error?'rgba(255,98,119,.45)':'';el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2400)}
@@ -394,7 +395,7 @@ function drawSelectedTrip(fit=false){
   $('showTripOnMap').disabled=all.length<2;$('clearTripFromMap').disabled=all.length<2;
   if(fit&&all.length>1){map.fitBounds(L.latLngBounds(all),{padding:[70,70]});$('tripPanel').classList.remove('open')}
 }
-function clearTripTrack(){tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();tripTrajectoryLayer.clearLayers();$('clearTripFromMap').disabled=true;$('tripTrackStats').textContent='Трек скрыт'}
+function clearTripTrack(){if(referenceEditor.active&&!referenceEditor.close())return;tripRealTrackLayer.clearLayers();tripFakeTrackLayer.clearLayers();tripRouteLayer.clearLayers();tripEventLayer.clearLayers();tripTrajectoryLayer.clearLayers();$('clearTripFromMap').disabled=true;$('tripTrackStats').textContent='Трек скрыт'}
 function renderTripDetail(data){
   const trip=data.summary||{},events=data.events||[],samples=data.samples||[],routes=data.routes||[],switches=data.route_switches||[];
   const device=tripDevice(trip);
@@ -409,8 +410,8 @@ function renderTripDetail(data){
   selectedTripData=data;setLiveRouteVisible(false);renderTripRouteTimeline(data);drawSelectedTrip(false);
   requestAnimationFrame(()=>drawTripChart(samples,events));
 }
-async function loadTrip(id){selectedTripId=id;try{const data=await request(`/api/controller/trips/${encodeURIComponent(id)}`);renderTripDetail(data);document.querySelectorAll('.trip-list-item').forEach(button=>button.classList.toggle('active',button.dataset.tripId===id))}catch(error){toast(error.message,true)}}
-async function pollTrips(force=false){if(tripsBusy||(!$('tripPanel').classList.contains('open')&&!force))return;tripsBusy=true;try{const payload=await request('/api/controller/trips'),signature=JSON.stringify((payload.trips||[]).map(t=>[t.id,t.ended_ms,t.samples,t.correction_events,t.gps_outages]));if(force||signature!==lastTripSignature){lastTripSignature=signature;renderTripList(payload);if(selectedTripId)await loadTrip(selectedTripId)}}catch(error){if(force)toast(error.message,true)}finally{tripsBusy=false}}
+async function loadTrip(id){if(referenceEditor.active&&!referenceEditor.close())return;selectedTripId=id;try{const data=await request(`/api/controller/trips/${encodeURIComponent(id)}`);renderTripDetail(data);document.querySelectorAll('.trip-list-item').forEach(button=>button.classList.toggle('active',button.dataset.tripId===id))}catch(error){toast(error.message,true)}}
+async function pollTrips(force=false){if(referenceEditor.active||tripsBusy||(!$('tripPanel').classList.contains('open')&&!force))return;tripsBusy=true;try{const payload=await request('/api/controller/trips'),signature=JSON.stringify((payload.trips||[]).map(t=>[t.id,t.ended_ms,t.samples,t.correction_events,t.gps_outages]));if(force||signature!==lastTripSignature){lastTripSignature=signature;renderTripList(payload);if(selectedTripId)await loadTrip(selectedTripId)}}catch(error){if(force)toast(error.message,true)}finally{tripsBusy=false}}
 
 function projectTrajectoryPoints(points, anchorLat, anchorLon, initialBearingDeg, steerScale=1.0){
   if(!points||!points.length||!Number.isFinite(anchorLat)||!Number.isFinite(anchorLon))return [];
@@ -663,7 +664,7 @@ async function refreshRouteSources(source='all'){
   }catch(error){toast(error.message,true)}finally{buttons.forEach(button=>button.disabled=false)}
 }
 
-map.on('click',event=>{if(mapClickMode==='inspect'){const nearest=closestRouteSegment(event.latlng);if(!nearest){toast('Сначала загрузите маршрут',true);return}if(nearest.distance>55){toast('Нажмите ближе к линии маршрута',true);return}inspectSegment(nearest.index,nearest.point);return}const point={lat:event.latlng.lat,lon:event.latlng.lng};selectedMarker=setMarker(selectedMarker,point,'selected');$('selectedCoordinate').textContent=formatCoord(point);control({latitude:point.lat,longitude:point.lon,...calibrationPatch()},false).then(()=>toast('Начальная точка передана в AVD')).catch(()=>{})});
+map.on('click',event=>{if(referenceEditor.active)return;if(mapClickMode==='inspect'){const nearest=closestRouteSegment(event.latlng);if(!nearest){toast('Сначала загрузите маршрут',true);return}if(nearest.distance>55){toast('Нажмите ближе к линии маршрута',true);return}inspectSegment(nearest.index,nearest.point);return}const point={lat:event.latlng.lat,lon:event.latlng.lng};selectedMarker=setMarker(selectedMarker,point,'selected');$('selectedCoordinate').textContent=formatCoord(point);control({latitude:point.lat,longitude:point.lon,...calibrationPatch()},false).then(()=>toast('Начальная точка передана в AVD')).catch(()=>{})});
 map.on('dragstart zoomstart',()=>{userAdjustedMap=true});
 $('speed').addEventListener('input',()=>{$('speedValue').textContent=$('speed').value;queueControl({target_speed_kmh:number('speed')})});
 $('runButton').addEventListener('click',()=>control({running:true,target_speed_kmh:number('speed'),...calibrationPatch()},false).then(()=>toast('Симуляция запущена')).catch(()=>{}));

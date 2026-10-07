@@ -7,7 +7,7 @@
   <title>X50 Navigation Lab</title>
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css?v=1.11.18">
+  <link rel="stylesheet" href="styles.css?v=1.11.19">
 </head>
 <body>
   <main id="map" aria-label="Карта симулятора"></main>
@@ -109,6 +109,7 @@
           <button class="small-button" id="tripRawSteeringToggle" aria-pressed="false" title="Показать исходную несвязанную траекторию для диагностики">Сырая линия руля</button>
           <button class="small-button active" id="liveRouteToggle" aria-pressed="true" title="Показывать текущий маршрут ГУ поверх архива">Текущий маршрут</button>
           <button class="small-button" id="showTripOnMap" disabled>Показать на карте</button>
+          <button class="small-button" id="editReference">Редактировать достоверную траекторию</button>
           <button class="small-button subtle" id="clearTripFromMap" disabled>Скрыть трек</button>
         </div>
         <div class="trip-map-legend"><span><i class="real-track"></i>реальный GPS</span><span><i class="fake-track"></i>FakeGPS</span><span><i class="navigator-route"></i>маршруты Навигатора</span><span><i class="correction-point"></i>коррекция</span><b id="tripTrackStats">Трек не выбран</b></div>
@@ -290,10 +291,28 @@
     <div class="metric"><span>Пакеты</span><strong><b id="sentCount">0</b> успешно</strong><small><b id="failedCount">0</b> ошибок</small></div>
   </section>
 
+  <section id="referenceToolbar" class="reference-toolbar glass" hidden aria-label="Редактор достоверной траектории">
+    <strong>Достоверная траектория</strong>
+    <span id="referenceStatus" role="status"></span>
+    <div class="reference-actions">
+      <label><input id="referenceRope" type="checkbox" checked> Верёвка: сохранять длины звеньев</label>
+      <label>Узел <input id="referenceIndex" type="number" min="1" value="1" style="width:75px" aria-label="Номер узла референса"></label>
+      <button class="small-button" id="referenceZoom">Приблизить узел</button>
+      <button class="small-button" id="referenceSave">Сохранить</button>
+      <button class="small-button" id="referenceUndo">Отменить правку</button>
+      <button class="small-button" id="referenceJoin">Состыковать выбранный фрагмент</button>
+      <button class="small-button" id="referenceExport">Скачать JSON</button>
+      <button class="small-button" id="referenceClose">Выйти</button>
+      <button class="small-button" id="referenceDiscard" hidden>Отбросить и выйти</button>
+    </div>
+    <small>Зелёный — в допуске · жёлтый — отклонение · красный — большое отклонение · серый — нет угловых данных. Допуски: длина 10% (минимум 1 м), компас 5°, руль 8°. В режиме верёвки оба свободных конца фрагмента следуют за узлом.</small>
+    <small id="referenceNode">Наведите на узел для измерений. Пунктиры: FakeGPS — жёлтый, GPS — голубой. Увеличьте карту для точной правки.</small>
+  </section>
   <div class="toast" id="toast"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="trip_alignment.js?v=20260926-native-route-alignment"></script>
-  <script src="basemaps.js?v=1.11.18"></script>
-  <script src="app.js?v=1.11.18"></script>
+  <script src="basemaps.js?v=1.11.19"></script>
+  <script src="reference_editor.js?v=1.11.19"></script>
+  <script src="app.js?v=1.11.19"></script>
 </body>
 </html>
