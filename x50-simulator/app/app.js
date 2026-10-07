@@ -704,15 +704,33 @@ $('tripArchiveFile').addEventListener('change',async event=>{
   if(file.size>128*1024*1024){toast('Архив должен быть не больше 128 МБ',true);return}
   archiveUploading=true;$('createTripArchive').disabled=true;$('attachTripArchive').disabled=true;
   $('tripArchiveStatus').textContent='Загрузка и проверка архива…';
+  let uploadId=null;
   try{
-    const suffix=target?`?trip_id=${encodeURIComponent(target)}`:'';
-    const result=await request(`/api/controller/trips/import${suffix}`,{method:'POST',headers:{'Content-Type':'application/gzip','X-X50-Client':'navigation-lab'},body:file});
+    const session=await request('/api/controller/trips/import/start',{method:'POST',body:JSON.stringify({total_bytes:file.size,trip_id:target})});
+    uploadId=session.upload_id;
+    const chunkSize=Math.min(session.chunk_size,1024*1024);
+    for(let offset=0;offset<file.size;offset+=chunkSize){
+      const chunk=file.slice(offset,offset+chunkSize);
+      let sent=false,lastError;
+      for(let attempt=0;attempt<2&&!sent;attempt++){
+        try{await request(`/api/controller/trips/import/chunk?upload_id=${encodeURIComponent(uploadId)}&offset=${offset}`,{method:'POST',headers:{'Content-Type':'application/octet-stream','X-X50-Client':'navigation-lab'},body:chunk});sent=true}
+        catch(error){lastError=error}
+      }
+      if(!sent)throw lastError;
+      $('tripArchiveStatus').textContent=`Загрузка архива: ${Math.round(Math.min(offset+chunkSize,file.size)/file.size*100)}%`;
+    }
+    $('tripArchiveStatus').textContent='Архив загружен. Проверка и восстановление поездки…';
+    const result=await request('/api/controller/trips/import/finish',{method:'POST',body:JSON.stringify({upload_id:uploadId})});
+    uploadId=null;
     selectedTripId=result.trip_id;await pollTrips(true);
     $('tripArchiveStatus').textContent=result.already_imported?'Этот архив уже загружен.':
       `Архив добавлен: маршрутов ${result.routes}, измерений ${result.samples}, точек руля ${result.steering_points}, инерциальных ${result.inertial_points}.${result.complete?'':' В архиве нет записи завершения.'}`;
     toast(target?'Архив добавлен к поездке':'Поездка открыта из архива');
   }catch(error){$('tripArchiveStatus').textContent=error.message;toast(error.message,true)}
-  finally{archiveUploading=false;$('createTripArchive').disabled=false;$('attachTripArchive').disabled=false}
+  finally{
+    if(uploadId)await request('/api/controller/trips/import/cancel',{method:'POST',body:JSON.stringify({upload_id:uploadId})}).catch(()=>{});
+    archiveUploading=false;$('createTripArchive').disabled=false;$('attachTripArchive').disabled=false;
+  }
 });
 $('settingsToggle').addEventListener('click',()=>$('settingsPanel').classList.toggle('open'));
 $('settingsClose').addEventListener('click',()=>$('settingsPanel').classList.remove('open'));

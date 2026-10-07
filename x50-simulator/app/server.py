@@ -28,7 +28,7 @@ import tempfile
 
 from journal_trajectory import journal_points, journal_steering_events, journal_inertial_points, trajectory_for_trip
 from trajectory_order import snapshot_is_newer
-from archive_import import MAX_UPLOAD, parse_archive, validate_match
+from archive_import import MAX_UPLOAD, CHUNK_SIZE, ArchiveUploads, parse_archive, validate_match
 
 
 ROOT = Path(__file__).parent
@@ -1308,6 +1308,7 @@ class SimulationEngine:
             self.journal_dir = ROOT / ".x50-trip-journals"
             self.journal_dir.mkdir(parents=True, exist_ok=True)
         self.journal_points_cache = {}
+        self.archive_uploads = ArchiveUploads(self.journal_dir / ".uploads")
         self._last_integrate = time.monotonic()
         self._next_send = self._last_integrate
         self._next_route_poll = 0.0
@@ -2532,6 +2533,35 @@ class Handler(SimpleHTTPRequestHandler):
             self.reply_json(payload, status)
         elif path == "/api/controller/trips/finish":
             self.reply_json(self.engine.trip_store.finish("manual"))
+        elif path.startswith("/api/controller/trips/import/"):
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0 or length > CHUNK_SIZE:
+                    self.reply_json({"ok": False, "error": "Слишком большая часть архива"}, 413)
+                    return
+                uploads = self.engine.archive_uploads
+                if path.endswith("/chunk"):
+                    query = parse_qs(urlsplit(self.path).query)
+                    key = query.get("upload_id", [""])[0]
+                    offset = int(query.get("offset", ["-1"])[0])
+                    data = self.rfile.read(length)
+                    if len(data) != length:
+                        raise ValueError("Часть архива получена не полностью")
+                    self.reply_json(uploads.append(key, offset, data))
+                else:
+                    data = self.read_json()
+                    if path.endswith("/start"):
+                        self.reply_json(uploads.start(data.get("total_bytes"), data.get("trip_id")))
+                    elif path.endswith("/finish"):
+                        raw, target = uploads.finish(data.get("upload_id"))
+                        payload, status = self.engine.import_trip_archive(raw, target)
+                        self.reply_json(payload, status)
+                    elif path.endswith("/cancel"):
+                        self.reply_json(uploads.cancel(data.get("upload_id")))
+                    else:
+                        self.reply_json({"ok": False, "error": "unknown_upload_action"}, 404)
+            except (ValueError, TypeError, OSError) as error:
+                self.reply_json({"ok": False, "error": str(error)}, 400)
         elif path == "/api/controller/trips/import":
             try:
                 length = int(self.headers.get("Content-Length", "0"))

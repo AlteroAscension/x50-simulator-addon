@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import server
 from archive_import import parse_archive, validate_match
+from archive_import import ArchiveUploads, CHUNK_SIZE
 
 START = 1_790_000_000_000
 
@@ -48,6 +49,7 @@ class ArchiveImportTest(unittest.TestCase):
         self.engine.trajectory_store = server.TrajectoryStore(root / "traces")
         self.engine.journal_dir = root / "journals"
         self.engine.journal_dir.mkdir()
+        self.engine.archive_uploads = ArchiveUploads(root / "uploads")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -146,18 +148,55 @@ class ArchiveImportTest(unittest.TestCase):
         class Handler(server.Handler):
             engine = self.engine
             def log_message(self, *_): pass
+            def do_POST(self):
+                # Model the actual HA proxy body limit, rather than testing
+                # only the add-on's much larger direct HTTP allowance.
+                if int(self.headers.get("Content-Length", "0")) > 16 * 1024 * 1024:
+                    self.reply_json({"error": "proxy body limit"}, 413)
+                    return
+                super().do_POST()
         http = server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=http.serve_forever, daemon=True)
         thread.start()
         try:
             url = f"http://127.0.0.1:{http.server_port}/api/controller/trips/import"
-            with urlopen(Request(url, data=raw, headers={"Content-Type": "application/gzip"}), timeout=30) as response:
-                result = json.load(response)
-                self.assertTrue(result["ok"])
-                self.assertEqual(result["samples"], 4)
-                self.assertEqual(result["inertial_points"], 2)
+            def post(suffix, data):
+                with urlopen(Request(url+suffix, data=data), timeout=30) as response:
+                    return json.load(response)
+            session = post("/start", json.dumps({"total_bytes": len(raw)}).encode())
+            key = session["upload_id"]
+            for offset in range(0, len(raw), session["chunk_size"]):
+                data = raw[offset:offset+session["chunk_size"]]
+                result = post(f"/chunk?upload_id={key}&offset={offset}", data)
+                self.assertEqual(result["received_bytes"], offset+len(data))
+                if offset == 0:  # Retrying a lost HTTP response must be safe.
+                    self.assertEqual(post(f"/chunk?upload_id={key}&offset=0", data), result)
+            result = post("/finish", json.dumps({"upload_id": key}).encode())
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["samples"], 4)
+            self.assertEqual(result["inertial_points"], 2)
+            self.assertFalse(list(self.engine.archive_uploads.root.glob("*.part")))
         finally:
             http.shutdown(); http.server_close(); thread.join()
+
+    def test_upload_order_limits_expiry_and_cleanup(self):
+        uploads = self.engine.archive_uploads
+        key = uploads.start(4)["upload_id"]
+        with self.assertRaises(ValueError): uploads.append(key, 2, b"ab")
+        uploads.append(key, 0, b"ab")
+        with self.assertRaises(ValueError): uploads.append(key, 0, b"xx")
+        with self.assertRaises(ValueError): uploads.finish(key)
+        with self.assertRaises(ValueError): uploads.append(key, 2, b"x"*(CHUNK_SIZE+1))
+        uploads.append(key, 2, b"cd")
+        self.assertEqual(uploads.finish(key), (b"abcd", None))
+        key = uploads.start(4)["upload_id"]
+        uploads.sessions[key]["touched"] -= 901
+        with self.assertRaises(ValueError): uploads.append(key, 0, b"ab")
+        self.assertFalse(list(uploads.root.glob("*.part")))
+        keys = [uploads.start(4)["upload_id"] for _ in range(2)]
+        with self.assertRaises(ValueError): uploads.start(4)
+        for key in keys: uploads.cancel(key)
+        self.assertFalse(list(uploads.root.glob("*.part")))
 
 
 if __name__ == "__main__":

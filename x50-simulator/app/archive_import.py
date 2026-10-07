@@ -5,9 +5,84 @@ import io
 import json
 import math
 import re
+import threading
+import time
+import uuid
+from pathlib import Path
 
 MAX_UPLOAD = 128 * 1024 * 1024
 MAX_EXPANDED = 1024 * 1024 * 1024
+CHUNK_SIZE = 1024 * 1024
+
+
+class ArchiveUploads:
+    """Short-lived bounded disk staging for uploads through HA Ingress."""
+    def __init__(self, root):
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.RLock()
+        self.sessions = {}
+        # Sessions cannot survive a service restart.
+        for path in self.root.glob("*.part"):
+            path.unlink()
+
+    def _expire(self):
+        for key, item in list(self.sessions.items()):
+            if time.monotonic() - item["touched"] > 900:
+                self.cancel(key)
+
+    def start(self, total, target=None):
+        if not isinstance(total, int) or isinstance(total, bool) or not 0 < total <= MAX_UPLOAD:
+            raise ValueError("Архив должен быть не больше 128 МБ")
+        with self.lock:
+            self._expire()
+            if len(self.sessions) >= 2:
+                raise ValueError("Уже выполняются две загрузки архивов")
+            key = uuid.uuid4().hex
+            path = self.root / (key + ".part")
+            path.touch()
+            self.sessions[key] = dict(path=path, total=total, target=target, touched=time.monotonic())
+            return {"ok": True, "upload_id": key, "chunk_size": CHUNK_SIZE}
+
+    def append(self, key, offset, data):
+        with self.lock:
+            self._expire()
+            item = self.sessions.get(key)
+            if item is None:
+                raise ValueError("Загрузка не найдена или истекла")
+            size = item["path"].stat().st_size
+            if not data or len(data) > CHUNK_SIZE or offset < 0 or offset + len(data) > item["total"]:
+                raise ValueError("Некорректный размер части архива")
+            if offset < size:
+                with item["path"].open("rb") as stream:
+                    stream.seek(offset)
+                    if stream.read(len(data)) != data:
+                        raise ValueError("Повторная часть отличается от загруженной")
+            elif offset == size:
+                with item["path"].open("ab") as stream:
+                    stream.write(data)
+            else:
+                raise ValueError("Нарушен порядок частей архива")
+            item["touched"] = time.monotonic()
+            return {"ok": True, "received_bytes": item["path"].stat().st_size}
+
+    def finish(self, key):
+        with self.lock:
+            self._expire()
+            item = self.sessions.get(key)
+            if item is None or item["path"].stat().st_size != item["total"]:
+                raise ValueError("Архив загружен не полностью")
+            try:
+                return item["path"].read_bytes(), item["target"]
+            finally:
+                self.cancel(key)
+
+    def cancel(self, key):
+        with self.lock:
+            item = self.sessions.pop(key, None)
+            if item:
+                item["path"].unlink(missing_ok=True)
+            return {"ok": True}
 
 
 def number(value):

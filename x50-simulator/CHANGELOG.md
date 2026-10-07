@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.15
+
+- Upload trip archives in 1 MiB chunks to pass the HA HTTP proxy's 16 MiB request limit without changing Home Assistant settings.
+- Show upload progress, safely retry chunks, verify ordering and total size, and clean up cancelled or expired uploads.
+- Test a complete archive larger than 37 MiB through an HTTP endpoint enforcing the 16 MiB proxy limit.
+
 ## 1.11.14
 
 - Increase trip archive upload limit to 128 MiB in both the browser and server, allowing recordings larger than 32 MiB.
