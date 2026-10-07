@@ -152,12 +152,23 @@ body.inspect-mode #map{cursor:crosshair}
 @media(max-width:900px){.trajectory-panel{left:10px;right:10px;top:88px;bottom:88px}.control-row{grid-template-columns:1fr}}
 @media(max-width:620px){.trajectory-panel{inset:60px 8px 8px;padding:12px}.control-row{grid-template-columns:1fr}}
 
-.reference-toolbar{position:fixed;left:18px;right:18px;top:82px;z-index:950;padding:12px 16px;max-width:1100px;display:flex;flex-direction:column;gap:7px;color:#e8eef8}
+.reference-toolbar{position:fixed;left:10px;top:82px;z-index:950;padding:9px 12px;width:min(580px,calc(100vw - 20px));box-sizing:border-box;max-height:45vh;display:flex;flex-direction:column;gap:5px;color:#e8eef8}
+.reference-heading{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.reference-heading strong{margin-right:auto;font-size:13px}
+.reference-toolbar .small-button{padding:6px 9px;font-size:11px;min-height:30px}
+#referenceStatus{font-size:11px;color:#c0ccdc}
+#referenceBody{overflow:auto;min-height:0;display:flex;flex-direction:column;gap:6px;overscroll-behavior:contain}
+.reference-toolbar.collapsed #referenceBody{display:none}
+.reference-details summary{cursor:pointer;color:#bdd5ef;font-size:12px;padding:4px 0}
+.reference-details[open]{border-top:1px solid rgba(255,255,255,.15)}
+.reference-details .reference-actions{margin:5px 0}
+.reference-details small{display:block;margin:6px 0;line-height:1.4}
 .reference-toolbar[hidden],#referenceDiscard[hidden]{display:none!important}
-.reference-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.reference-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .reference-toolbar small{font-size:12px;color:#c0ccdc}
 .reference-tooltip{background:#111d30;color:#eff6ff;border:1px solid #94a3b8;font-size:12px;line-height:1.6;pointer-events:none}
 .reference-actions label{font-size:13px}
-@media(max-width:650px){.reference-toolbar{top:65px;left:5px;right:5px;max-height:38vh;overflow:auto}}
+@media(max-width:650px){.reference-toolbar{top:65px;left:5px;width:calc(100vw - 10px);max-height:42vh}.reference-heading{gap:4px}.reference-toolbar .small-button{padding:5px 7px}.reference-actions label{font-size:12px}}
+@media(max-height:500px) and (min-width:651px){.reference-toolbar{top:76px;max-height:calc(100vh - 90px)}}
 body.reference-editing #leftStack{display:none}
 body.reference-editing .telemetry{display:none}

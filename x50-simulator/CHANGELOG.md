@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.21
+
+- Make the reference editor toolbar compact and collapsible; keep save, undo and exit available when collapsed.
+- Move range tools, fragment operations, export and help into closed expandable sections. Limit panel height and scroll its contents on small screens.
+
 ## 1.11.20
 
 - Keep the original inertial trajectory visible while editing; add time-aligned dashed links to original inertial nodes alongside GPS and FakeGPS.
