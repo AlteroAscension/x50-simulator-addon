@@ -35,8 +35,10 @@ assert.equal(JSON.stringify([chain[0],chain[1],chain[13],chain[14]]),outer,'Prop
 for(let i=3;i<=12;i++)assert.ok(Math.abs(distance(chain[i-1],chain[i])-10)<.021);
 const pinned=JSON.stringify(chain);
 assert.equal(rope(chain,2,destination(chain[2],0,5)),false);
-assert.equal(rope(chain,7,destination(chain[7],0,500)),false);
-assert.equal(JSON.stringify(chain),pinned,'Impossible movement must roll back transactionally');
+assert.equal(JSON.stringify(chain),pinned,'Dragging a locked node must not change geometry');
+assert.equal(rope(chain,7,destination(chain[7],0,500)),true,'Outside cursor must tension the rope instead of rejecting');
+assert.equal(JSON.stringify([chain[2],chain[12]]),anchors);
+for(let i=3;i<=12;i++)assert.ok(Math.abs(distance(chain[i-1],chain[i])-10)<.021);
 assert.equal(excludeRange(chain,1,3),false,'Locked nodes cannot be excluded accidentally');
 assert.equal(excludeRange(chain,4,6),true);
 assert.equal(segments(chain).length,2,'Deleted middle must never produce a connecting chord');
@@ -54,4 +56,32 @@ const cutChain=structuredClone(nodes);cutChain[10].cut_before=true;
 assert.equal(segments(cutChain).length,3,'Manual break must split read-only geometry');
 const fixed=JSON.stringify(cutChain.slice(0,10));rope(cutChain,15,destination(cutChain[15],0,10));
 assert.equal(JSON.stringify(cutChain.slice(0,10)),fixed,'Manual break stops rope');
-console.log('Anchored rope, transactional rejection, excluded ranges and manual cuts PASS');
+console.log('Anchored rope, tension constraints, excluded ranges and manual cuts PASS');
+const single=[{...origin,locked:true,break_before:true,rest_m:0},{...destination(origin,0,10),rest_m:10},
+  {...destination(origin,0,20),rest_m:10}];
+for(let az=0;az<360;az+=10){
+  assert.equal(rope(single,1,destination(origin,az,500)),true);
+  assert.ok(distance(single[1],destination(origin,az,10))<.002,'Adjacent point slides on fixed-radius circle');
+  assert.ok(Math.abs(distance(single[1],single[2])-10)<.002,'Free tail follows tensioned link');
+  assert.deepEqual({lat:single[0].lat,lon:single[0].lon},origin);
+}
+assert.equal(rope(single,1,origin),true,'Cursor at the anchor uses prior direction for the minimum radius');
+assert.ok(Math.abs(distance(origin,single[1])-10)<.002);
+const taut=[{...origin,locked:true,break_before:true,rest_m:0}];
+for(let i=1;i<=20;i++)taut.push({...destination(origin,90,i*10),rest_m:10});
+assert.equal(rope(taut,20,destination(origin,0,500)),true,'Long taut chain must straighten without iterative stalling');
+assert.ok(distance(taut[20],destination(origin,0,200))<.002);
+for(let i=1;i<taut.length;i++)assert.ok(Math.abs(distance(taut[i-1],taut[i])-10)<.021);
+const twoPins=[{...origin,locked:true,break_before:true,rest_m:0},
+  {...destination(origin,90,10),rest_m:10},{...destination(origin,90,20),rest_m:10,locked:true}];
+assert.equal(rope(twoPins,1,destination(origin,0,300)),true,'Two tangent reach circles keep the sole feasible point');
+assert.ok(distance(twoPins[1],destination(origin,90,10))<.002);
+const zero=[{...origin,locked:true,break_before:true},{...origin,rest_m:0}];
+assert.equal(rope(zero,1,destination(origin,0,100)),true);
+assert.ok(distance(zero[0],zero[1])<.002,'Zero-distance samples remain coincident');
+console.log('Circle sliding, full rotation, two anchors, taut chain and zero links PASS');
+const unequal=[{...origin,locked:true,break_before:true},{...destination(origin,90,8),rest_m:8},
+  {...destination(origin,90,10),rest_m:2}];
+assert.equal(rope(unequal,2,origin),true);
+assert.ok(Math.abs(distance(origin,unequal[2])-6)<.002,'Minimum reach of unequal links must also clamp');
+for(let i=1;i<unequal.length;i++)assert.ok(Math.abs(distance(unequal[i-1],unequal[i])-unequal[i].rest_m)<.021);

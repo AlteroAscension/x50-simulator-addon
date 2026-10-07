@@ -6,18 +6,72 @@
   function bearing(a,b){const p=a.lat*rad,q=b.lat*rad,y=(b.lon-a.lon)*rad;return (Math.atan2(Math.sin(y)*Math.cos(q),Math.cos(p)*Math.sin(q)-Math.sin(p)*Math.cos(q)*Math.cos(y))/rad+360)%360}
   function destination(a,heading,length){const p=a.lat*rad,q=a.lon*rad,h=heading*rad,d=length/R;const lat=Math.asin(Math.sin(p)*Math.cos(d)+Math.cos(p)*Math.sin(d)*Math.cos(h));return {lat:lat/rad,lon:angle((q+Math.atan2(Math.sin(h)*Math.sin(d)*Math.cos(p),Math.cos(d)-Math.sin(p)*Math.sin(lat)))/rad)}}
   const broken=(nodes,i)=>i===0||nodes[i].break_before||nodes[i].cut_before||nodes[i].excluded||nodes[i-1].excluded;
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  function circles(a,r,b,s){
+    const d=distance(a,b);
+    if(d<1e-7||d>r+s+.00001||d<Math.abs(r-s)-.00001)return [];
+    if(r<1e-7)return Math.abs(d-s)<.002?[{lat:a.lat,lon:a.lon}]:[];
+    // Stable spherical cosine rule: avoid subtracting nearly equal cosines
+    // for metre-sized links on a 6371 km sphere.
+    const x=Math.sin(r/R/2)**2,y=Math.sin(d/R/2)**2,z=Math.sin(s/R/2)**2;
+    const turn=Math.acos(clamp((2*(x+y-z)-4*x*y)/(Math.sin(r/R)*Math.sin(d/R)),-1,1))/rad;
+    const heading=bearing(a,b);
+    return [destination(a,heading+turn,r),destination(a,heading-turn,r)];
+  }
+  function reachableTarget(target,previous,constraints){
+    if(!constraints.length)return target;
+    const feasible=p=>constraints.every(c=>{const d=distance(p,c.anchor);return d>=c.min-.002&&d<=c.max+.002});
+    if(feasible(target))return target;
+    const candidates=[previous],boundaries=[];
+    for(const c of constraints){
+      const heading=distance(c.anchor,target)>.00001?bearing(c.anchor,target):bearing(c.anchor,previous);
+      for(const radius of new Set([c.min,c.max])){
+        candidates.push(destination(c.anchor,heading,radius));boundaries.push({anchor:c.anchor,radius});
+      }
+    }
+    for(let i=0;i<boundaries.length;i++)for(let j=i+1;j<boundaries.length;j++){
+      const a=boundaries[i],b=boundaries[j];candidates.push(...circles(a.anchor,a.radius,b.anchor,b.radius));
+    }
+    return candidates.filter(feasible).sort((a,b)=>distance(a,target)-distance(b,target)||distance(a,previous)-distance(b,previous))[0]||null;
+  }
+  function fitChain(nodes,ids,lengths,anchor){
+    // Construct a feasible chain when iterative fitting stalls near a taut
+    // boundary. Each next link intersects the reachable circle of the tail;
+    // prefer the intersection nearest its previous position to retain shape.
+    const sums=new Array(ids.length).fill(0),longest=new Array(ids.length).fill(0);
+    for(let k=lengths.length-1;k>=0;k--){sums[k]=sums[k+1]+lengths[k];longest[k]=Math.max(longest[k+1],lengths[k])}
+    for(let k=0;k<lengths.length-1;k++){
+      const a=nodes[ids[k]],old=nodes[ids[k+1]],l=lengths[k],d=distance(a,anchor);
+      if(l<1e-7){Object.assign(old,{lat:a.lat,lon:a.lon});continue}
+      const lo=Math.max(0,2*longest[k+1]-sums[k+1],Math.abs(d-l)),hi=Math.min(sums[k+1],d+l);
+      if(lo>hi+.002)return false;
+      const tail=clamp(distance(old,anchor),Math.min(lo,hi),hi);
+      const options=d<1e-7?[destination(a,bearing(a,old),l)]:circles(a,l,anchor,tail);
+      if(!options.length)return false;
+      options.sort((p,q)=>distance(p,old)-distance(q,old));Object.assign(old,options[0]);
+    }
+    Object.assign(nodes[ids.at(-1)],anchor);
+    return ids.slice(1).every((i,k)=>Math.abs(distance(nodes[ids[k]],nodes[i])-lengths[k])<.02);
+  }
   function rope(nodes,index,target){
     if(nodes[index].locked||nodes[index].excluded)return false;
     const before=nodes.map(n=>({lat:n.lat,lon:n.lon}));
-    nodes[index].lat=target.lat;nodes[index].lon=target.lon;
+    const sides=[];
     for(const direction of [-1,1]){
       const ids=[index];
       for(let i=index+direction;i>=0&&i<nodes.length&&!broken(nodes,Math.max(i,i-direction));i+=direction){ids.push(i);if(nodes[i].locked)break}
       const lengths=ids.slice(1).map((i,k)=>nodes[Math.max(i,ids[k])].rest_m);
       const last=ids.at(-1),anchor=nodes[last].locked?before[last]:null;
+      const total=lengths.reduce((a,b)=>a+b,0),min=Math.max(0,2*lengths.reduce((a,b)=>Math.max(a,b),0)-total);
+      sides.push({ids,lengths,last,anchor,min,max:total});
+    }
+    target=reachableTarget(target,before[index],sides.filter(s=>s.anchor));
+    if(!target)return false;
+    Object.assign(nodes[index],target);
+    for(const {ids,lengths,last,anchor,min,max:total} of sides){
       if(anchor){
-        const total=lengths.reduce((a,b)=>a+b,0),min=Math.max(0,2*Math.max(0,...lengths)-total),span=distance(target,anchor);
-        if(span>total+.005||span<min-.005){nodes.forEach((n,i)=>Object.assign(n,before[i]));return false}
+        const span=distance(target,anchor);
+        if((Math.abs(span-total)<.002||Math.abs(span-min)<.002)&&fitChain(nodes,ids,lengths,anchor))continue;
         // FABRIK: fixed dragged endpoint and fixed nearest lock. Seed a small
         // bend so collinear chains can fold rather than stall indefinitely.
         if(ids.length>2&&span<total-.1){const mid=ids[Math.floor(ids.length/2)];Object.assign(nodes[mid],destination(nodes[mid],bearing(target,anchor)+90,Math.min(1,total*.01)))}
@@ -30,6 +84,7 @@
         Object.assign(nodes[last],anchor);
         for(let k=ids.length-2;k>=0;k--)Object.assign(nodes[ids[k]],destination(nodes[ids[k+1]],bearing(nodes[ids[k+1]],nodes[ids[k]]),lengths[k]));
       }
+      if(!solved){Object.assign(nodes[index],target);solved=fitChain(nodes,ids,lengths,anchor)}
       if(!solved){nodes.forEach((n,i)=>Object.assign(n,before[i]));return false}
       if(anchor)Object.assign(nodes[last],anchor);
     }
@@ -94,7 +149,7 @@
     function beginDrag(index,event){
       if(busy||!active||drag||document.nodes[index].locked||document.nodes[index].excluded)return;
       L.DomEvent.stop(event);checkpoint();selected=index;
-      drag={index,origin:positions(),wasDragging:map.dragging.enabled()};
+      drag={index,wasDragging:map.dragging.enabled()};
       map.dragging.disable();marks[index].closeTooltip();
     }
     function status(){if(!document)return;$('referenceStatus').textContent=`${dirty?'Есть несохранённые правки':'Сохранено'} · версия ${document.revision} · ${document.nodes.filter(n=>!n.excluded).length} узлов · ${document.nodes.filter(n=>n.locked).length} замков · ${document.nodes.filter(n=>n.excluded).length} исключено`;$('referenceSave').disabled=busy||!dirty;$('referenceUndo').disabled=busy||!undo.length;const n=document.nodes[selected];$('referenceLock').textContent=n?.locked?'Снять замок':'Закрепить узел';$('referenceLock').setAttribute('aria-pressed',String(!!n?.locked));$('referenceLock').disabled=busy||!!n?.excluded}
@@ -129,9 +184,9 @@
         }
       });status();
     }
-    function applyDrag(){document.nodes.forEach((n,i)=>Object.assign(n,drag.origin[i]));drag.rejected=$('referenceRope').checked&&!rope(document.nodes,drag.index,drag.target);if(!$('referenceRope').checked)Object.assign(document.nodes[drag.index],drag.target);if(!drag.rejected)dirty=true;draw()}
+    function applyDrag(){drag.rejected=$('referenceRope').checked&&!rope(document.nodes,drag.index,drag.target);if(!$('referenceRope').checked)Object.assign(document.nodes[drag.index],drag.target);if(!drag.rejected)dirty=true;draw()}
     function move(event){if(!drag)return;if(event.cancelable)event.preventDefault();const latlng=map.mouseEventToLatLng(event.touches?event.touches[0]:event);drag.target={lat:latlng.lat,lon:latlng.lng};if(frame)cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{frame=null;if(drag)applyDrag()})}
-    function end(){if(!drag)return;if(frame){cancelAnimationFrame(frame);frame=null}if(drag.target)applyDrag();if(drag.rejected)toast('Замки и длины звеньев не позволяют это перемещение. Снимите ближайший замок или отключите верёвку.',true);if(drag.wasDragging)map.dragging.enable();drag=null;draw()}
+    function end(){if(!drag)return;if(frame){cancelAnimationFrame(frame);frame=null}if(drag.target)applyDrag();if(drag.rejected)toast('Между замками недостаточно длины нитки. Последнее доступное положение сохранено; проверьте замки или отключите верёвку.',true);if(drag.wasDragging)map.dragging.enable();drag=null;draw()}
     window.document.addEventListener('mousemove',move);window.document.addEventListener('mouseup',end);window.document.addEventListener('touchmove',move,{passive:false});window.document.addEventListener('touchend',end);window.document.addEventListener('touchcancel',end);
     // Canvas paths have no native touchstart event. Hit-test the visible nodes
     // before Leaflet starts panning; keep pinch gestures available elsewhere.

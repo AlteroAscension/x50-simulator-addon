@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.22
+
+- Tension the reference rope against locked nodes instead of rejecting cursor movements outside its reach. Adjacent nodes slide along a fixed-radius circle; two locks constrain the point from both sides.
+- Construct taut and folded chains geometrically when iterative fitting stalls, retaining fixed anchors and measured link lengths. Continue each drag from the preceding position for smoother deformation.
+- Cover full-circle drags, distant cursor positions, two tangent anchors, long taut chains, zero-length samples and unequal-link minimum reach.
+
 ## 1.11.21
 
 - Make the reference editor toolbar compact and collapsible; keep save, undo and exit available when collapsed.
