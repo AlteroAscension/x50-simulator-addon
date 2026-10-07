@@ -188,7 +188,13 @@ class ArchiveImportTest(unittest.TestCase):
         with self.assertRaises(ValueError): uploads.finish(key)
         with self.assertRaises(ValueError): uploads.append(key, 2, b"x"*(CHUNK_SIZE+1))
         uploads.append(key, 2, b"cd")
-        self.assertEqual(uploads.finish(key), (b"abcd", None))
+        ready, target = uploads.finish(key)
+        self.assertEqual(ready.read_bytes(), b"abcd")
+        self.assertIsNone(target)
+        # Complete uploads survive a restart until their original is retained.
+        ArchiveUploads(uploads.root)
+        self.assertTrue(ready.exists())
+        ready.unlink()
         key = uploads.start(4)["upload_id"]
         uploads.sessions[key]["touched"] -= 901
         with self.assertRaises(ValueError): uploads.append(key, 0, b"ab")
@@ -197,6 +203,33 @@ class ArchiveImportTest(unittest.TestCase):
         with self.assertRaises(ValueError): uploads.start(4)
         for key in keys: uploads.cancel(key)
         self.assertFalse(list(uploads.root.glob("*.part")))
+
+    def test_original_is_retained_if_processing_fails(self):
+        raw = archive()
+        with patch("server.parse_archive", side_effect=ValueError("processing failed")):
+            self.assertEqual(self.engine.import_trip_archive(raw)[1], 400)
+        copies = list(self.engine.journal_dir.glob("uploaded-*.jsonl.gz"))
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(copies[0].read_bytes(), raw)
+        result, status = self.engine.import_trip_archive(copies[0])
+        self.assertEqual(status, 200)
+        self.assertEqual(result["samples"], 4)
+        self.assertFalse(list(self.engine.journal_dir.glob("uploaded-*.jsonl.gz")))
+
+    def test_samples_do_not_duplicate_diagnostic_logs(self):
+        rows = gzip.decompress(archive()).decode().splitlines()
+        for i, line in enumerate(rows):
+            record = json.loads(line)
+            if record["type"] == "diagnostic_tick":
+                record["data"]["audit_recent_events"] = [{"message": "diagnostic-only"}]
+                record["data"]["inertial_trajectory"] = {"last_step": {"after_lat": 1, "after_lon": 2}, "legacy": {"large": "diagnostic"}}
+                rows[i] = json.dumps(record)
+        imported = parse_archive(gzip.compress(("\n".join(rows)+"\n").encode()))
+        sample = imported["samples"][0]
+        self.assertNotIn("audit_recent_events", sample)
+        self.assertNotIn("inertial_trajectory", sample)
+        self.assertEqual(sample["inertial_step"]["after_lat"], 1)
+        self.assertEqual(sample["carlinkit_lat"], 1)
 
 
 if __name__ == "__main__":

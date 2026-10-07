@@ -28,7 +28,7 @@ import tempfile
 
 from journal_trajectory import journal_points, journal_steering_events, journal_inertial_points, trajectory_for_trip
 from trajectory_order import snapshot_is_newer
-from archive_import import MAX_UPLOAD, CHUNK_SIZE, ArchiveUploads, parse_archive, validate_match
+from archive_import import MAX_UPLOAD, CHUNK_SIZE, ARCHIVE_SAMPLE_KEYS, ArchiveUploads, archive_hash, parse_archive, validate_match
 
 
 ROOT = Path(__file__).parent
@@ -494,7 +494,8 @@ class TripLogStore:
     @staticmethod
     def _atomic_json(path, payload):
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        with temporary.open("w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
         temporary.replace(path)
 
     def _append(self, trip_id, record):
@@ -765,43 +766,7 @@ class TripLogStore:
         self.outage = None
 
     def _sample(self, now_ms, data, context):
-        keys = (
-            "enabled", "mode", "reason", "vehicle_speed_kmh", "corrected_speed_kmh", "speed_factor",
-            "odometer_km", "odometer_delta_m", "corrected_delta_m", "distance_factor",
-            "distance_calibration_count", "distance_calibration_ratio",
-            "distance_calibration_window_m", "distance_calibration_correction_bias",
-            "calibration_mode", "calibration_mode_code",
-            "calibration_accepted_windows", "calibration_rejected_windows",
-            "calibration_distance_m", "calibration_trip_count",
-            "distance_candidate_factor", "distance_calibration_confidence",
-            "distance_calibration_mad", "distance_calibration_samples",
-            "speed_candidate_factor", "speed_calibration_confidence",
-            "speed_calibration_mad", "speed_calibration_samples",
-            "calibration_correction_bias_median",
-            "progress_source", "route_length_m", "progress_m",
-            "route_match_progress_m", "route_match_distance_m", "last_progress_correction_m",
-            "last_correction_weight", "correction_target_progress_m", "correction_prediction_m",
-            "correction_raw_delta_m", "correction_target_delta_m",
-            "correction_verified_recovery",
-            "correction_fix_age_ms", "correction_fix_time_ms", "correction_mode",
-            "correction_total_m", "correction_abs_total_m", "recovery_correction_count",
-            "gps_recovery_pending", "gps_recovery_candidate_fixes", "gps_outage_age_ms",
-            "last_gps_recovery_outage_ms", "real_gps_age_ms", "real_gps_received_age_ms",
-            "real_gps_fix_time_ms", "real_gps_quality_good", "carlinkit_fix_age_ms", "carlinkit_lat",
-            "carlinkit_lon", "carlinkit_accuracy_m", "carlinkit_speed_kmh", "carlinkit_bearing",
-            "gps_gap_m", "correction_count", "rejected_corrections", "injected_count",
-            "tick_raw_dt_ms", "tick_max_raw_dt_ms", "tick_discarded_time_ms",
-            "fake_lat", "fake_lon", "off_route_passthrough", "off_route_distance_m",
-            "off_route_candidate_fixes", "off_route_recovery_fixes",
-            "off_route_started_ms", "off_route_elapsed_ms",
-            "off_route_started_route_generation", "gps_vehicle_speed_difference_kmh",
-            "route_generation", "route_activation_count", "route_activated_at_ms",
-            "route_identity", "route_source", "exact_route_fresh",
-            "exact_route_available", "exact_route_id", "exact_route_captured_ms",
-            "exact_route_producer", "fake_provider_enabled", "route_reanchor_pending",
-            "steering_angle_deg", "steering_fresh", "steering_age_ms", "gear_code",
-            "motion_age_ms", "motion_steering_skew_ms", "virtual_trajectory",
-            "compass")
+        keys = ARCHIVE_SAMPLE_KEYS
         sample = {"kind": "sample", "time_ms": now_ms, "gps_good": self._gps_good(data),
                   "journal_source": context.get("journal_source", "gateway_direct"),
                   "device_kind": context.get("device_kind", self.device_kind)}
@@ -1721,6 +1686,21 @@ class SimulationEngine:
     def import_trip_archive(self, raw, target_id=None):
         """Import without touching the live journal or simulation engine."""
         try:
+            # Preserve the complete original before parsing. A killed process
+            # must not lose the uploaded archive.
+            size = raw.stat().st_size if isinstance(raw, Path) else len(raw)
+            if not 0 < size <= MAX_UPLOAD:
+                raise ValueError("Архив должен быть не больше 128 МБ")
+            digest = archive_hash(raw)
+            retained = self.journal_dir / ("uploaded-" + digest + ".jsonl.gz")
+            if not retained.exists():
+                temporary = retained.with_suffix(".upload.tmp")
+                if isinstance(raw, Path):
+                    shutil.copyfile(raw, temporary)
+                else:
+                    temporary.write_bytes(raw)
+                temporary.replace(retained)
+            raw = retained
             archive = parse_archive(raw)
             journal_id = archive["summary"]["source_journal_id"]
             store = self.trip_store.stores["head_unit"]
@@ -1733,6 +1713,7 @@ class SimulationEngine:
                 trip_id = target_id or archive["summary"]["id"]
                 existing, status = self.trip_store.detail(trip_id)
                 if status == 200 and existing["summary"].get("archive_sha256") == archive["summary"]["archive_sha256"]:
+                    retained.unlink(missing_ok=True)
                     return {"ok": True, "trip_id": trip_id, "already_imported": True}, 200
                 if target_id:
                     if status != 200:
@@ -1746,7 +1727,7 @@ class SimulationEngine:
                     raise ValueError("Неполный архив не может заменить уже загруженный полный")
                 with tempfile.TemporaryDirectory() as temporary:
                     path = Path(temporary) / "journal.jsonl.gz"
-                    path.write_bytes(raw)
+                    shutil.copyfile(raw, path)
                     archive["summary"]["id"] = trip_id
                     inertial = journal_inertial_points(path)
                     trace = trajectory_for_trip(journal_points(path), journal_id, archive,
@@ -1777,8 +1758,9 @@ class SimulationEngine:
                 store._atomic_json(store._paths(trip_id)[1], summary)
                 cache = self.journal_dir / (journal_id + ".jsonl.gz")
                 temporary = cache.with_suffix(".upload.tmp")
-                temporary.write_bytes(raw)
+                shutil.copyfile(raw, temporary)
                 temporary.replace(cache)
+                retained.unlink(missing_ok=True)
                 return {"ok": True, "trip_id": trip_id, "routes": len(archive["routes"]),
                         "samples": len(archive["samples"]), "steering_points": trace["point_count"] if trace else 0,
                         "inertial_points": (trace or {}).get("inertial", {}).get("point_count", 0),
@@ -2555,6 +2537,7 @@ class Handler(SimpleHTTPRequestHandler):
                     elif path.endswith("/finish"):
                         raw, target = uploads.finish(data.get("upload_id"))
                         payload, status = self.engine.import_trip_archive(raw, target)
+                        raw.unlink(missing_ok=True)
                         self.reply_json(payload, status)
                     elif path.endswith("/cancel"):
                         self.reply_json(uploads.cancel(data.get("upload_id")))

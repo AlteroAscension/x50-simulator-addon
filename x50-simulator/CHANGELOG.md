@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.11.16
+
+- Import completed uploads directly from disk rather than loading the entire compressed archive into RAM.
+- Retain the original gzip before parsing so a process failure does not lose the fully uploaded file.
+- Keep the same trip measurements as live recording without duplicating large diagnostic histories in every sample; full diagnostics remain in the original archive.
+- Stream atomic JSON writes instead of constructing large JSON strings in memory.
+- Verify the reported 37 MiB real archive in isolated storage: about 109 MiB peak during import and 128 MiB when opening the trip on the test host; 37 Python tests pass.
+
 ## 1.11.15
 
 - Upload trip archives in 1 MiB chunks to pass the HA HTTP proxy's 16 MiB request limit without changing Home Assistant settings.

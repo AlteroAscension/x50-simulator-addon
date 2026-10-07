@@ -13,6 +13,33 @@ from pathlib import Path
 MAX_UPLOAD = 128 * 1024 * 1024
 MAX_EXPANDED = 1024 * 1024 * 1024
 CHUNK_SIZE = 1024 * 1024
+ARCHIVE_SAMPLE_KEYS = (
+    'enabled', 'mode', 'reason', 'vehicle_speed_kmh',
+    'corrected_speed_kmh', 'speed_factor', 'odometer_km', 'odometer_delta_m',
+    'corrected_delta_m', 'distance_factor', 'distance_calibration_count', 'distance_calibration_ratio',
+    'distance_calibration_window_m', 'distance_calibration_correction_bias', 'calibration_mode', 'calibration_mode_code',
+    'calibration_accepted_windows', 'calibration_rejected_windows', 'calibration_distance_m', 'calibration_trip_count',
+    'distance_candidate_factor', 'distance_calibration_confidence', 'distance_calibration_mad', 'distance_calibration_samples',
+    'speed_candidate_factor', 'speed_calibration_confidence', 'speed_calibration_mad', 'speed_calibration_samples',
+    'calibration_correction_bias_median', 'progress_source', 'route_length_m', 'progress_m',
+    'route_match_progress_m', 'route_match_distance_m', 'last_progress_correction_m', 'last_correction_weight',
+    'correction_target_progress_m', 'correction_prediction_m', 'correction_raw_delta_m', 'correction_target_delta_m',
+    'correction_verified_recovery', 'correction_fix_age_ms', 'correction_fix_time_ms', 'correction_mode',
+    'correction_total_m', 'correction_abs_total_m', 'recovery_correction_count', 'gps_recovery_pending',
+    'gps_recovery_candidate_fixes', 'gps_outage_age_ms', 'last_gps_recovery_outage_ms', 'real_gps_age_ms',
+    'real_gps_received_age_ms', 'real_gps_fix_time_ms', 'real_gps_quality_good', 'carlinkit_fix_age_ms',
+    'carlinkit_lat', 'carlinkit_lon', 'carlinkit_accuracy_m', 'carlinkit_speed_kmh',
+    'carlinkit_bearing', 'gps_gap_m', 'correction_count', 'rejected_corrections',
+    'injected_count', 'tick_raw_dt_ms', 'tick_max_raw_dt_ms', 'tick_discarded_time_ms',
+    'fake_lat', 'fake_lon', 'off_route_passthrough', 'off_route_distance_m',
+    'off_route_candidate_fixes', 'off_route_recovery_fixes', 'off_route_started_ms', 'off_route_elapsed_ms',
+    'off_route_started_route_generation', 'gps_vehicle_speed_difference_kmh', 'route_generation', 'route_activation_count',
+    'route_activated_at_ms', 'route_identity', 'route_source', 'exact_route_fresh',
+    'exact_route_available', 'exact_route_id', 'exact_route_captured_ms', 'exact_route_producer',
+    'fake_provider_enabled', 'route_reanchor_pending', 'steering_angle_deg', 'steering_fresh',
+    'steering_age_ms', 'gear_code', 'motion_age_ms', 'motion_steering_skew_ms',
+    'virtual_trajectory', 'compass',
+)
 
 
 class ArchiveUploads:
@@ -72,10 +99,10 @@ class ArchiveUploads:
             item = self.sessions.get(key)
             if item is None or item["path"].stat().st_size != item["total"]:
                 raise ValueError("Архив загружен не полностью")
-            try:
-                return item["path"].read_bytes(), item["target"]
-            finally:
-                self.cancel(key)
+            ready = item["path"].with_suffix(".ready")
+            item["path"].replace(ready)
+            self.sessions.pop(key)
+            return ready, item["target"]
 
     def cancel(self, key):
         with self.lock:
@@ -90,7 +117,9 @@ def number(value):
 
 
 def parse_archive(payload):
-    if not payload or len(payload) > MAX_UPLOAD:
+    path = payload if isinstance(payload, Path) else None
+    size = path.stat().st_size if path else len(payload)
+    if not size or size > MAX_UPLOAD:
         raise ValueError("Архив пустой или превышает 128 МБ")
     samples, routes, switches, events = {}, {}, [], []
     start = end = journal_id = None
@@ -98,7 +127,7 @@ def parse_archive(payload):
     diagnostic, current_route, device = {}, None, "head_unit"
     expanded = rows = 0
     try:
-        with gzip.GzipFile(fileobj=io.BytesIO(payload)) as stream:
+        with (gzip.open(path, "rb") if path else gzip.GzipFile(fileobj=io.BytesIO(payload))) as stream:
             while True:
                 line = stream.readline(2 * 1024 * 1024 + 1)
                 if not line:
@@ -139,13 +168,18 @@ def parse_archive(payload):
                             route_id=routes[sid]["route_id"], route_source=data.get("route_source")))
                         current_route = sid
                 elif kind == "diagnostic_tick":
-                    diagnostic = data
+                    # Retain the same measurements as the live trip journal;
+                    # full diagnostics remain in the original gzip on disk.
+                    diagnostic = {k: data[k] for k in ARCHIVE_SAMPLE_KEYS if k in data}
+                    inertial = data.get("inertial_trajectory")
+                    if isinstance(inertial, dict) and isinstance(inertial.get("last_step"), dict):
+                        diagnostic["inertial_step"] = inertial["last_step"]
                     device = "avd" if data.get("is_emulator") or data.get("device_kind") == "avd" else device
                     if data.get("route_available") is False and current_route:
                         switches.append(dict(kind="route_switch", time_ms=stamp,
                             from_snapshot_id=current_route, to_snapshot_id=None))
                         current_route = None
-                    sample = dict(data, kind="sample", time_ms=stamp, route_snapshot_id=current_route)
+                    sample = dict(diagnostic, kind="sample", time_ms=stamp, route_snapshot_id=current_route)
                     sample["gps_good"] = bool(data.get("real_gps_quality_good"))
                     samples[int(stamp // 1000)] = sample
                 elif kind == "vehicle_sample":
@@ -159,7 +193,7 @@ def parse_archive(payload):
                     sample["steering_angle_deg"] = data.get("steer_angle_deg")
                     sample["gps_good"] = bool(sample.get("real_gps_quality_good"))
                     samples[bucket] = sample
-                elif kind.startswith("steering_") or kind == "coordinate_decision":
+                elif kind.startswith("steering_"):
                     events.append(dict(kind="event", event=kind, time_ms=stamp, data=data))
     except (OSError, EOFError, UnicodeError, json.JSONDecodeError, TypeError, AttributeError) as error:
         raise ValueError("Повреждённый gzip/JSONL архив Navigation") from error
@@ -176,7 +210,7 @@ def parse_archive(payload):
                      min(2, max(0, (b["time_ms"]-a["time_ms"])/1000)) for a, b in zip(samples, samples[1:]))
     summary = dict(id="archive_"+journal_id, active=False, started_ms=start, ended_ms=finish,
         duration_s=(finish-start)/1000, device_kind=device, journal_source="uploaded_navigation_archive",
-        source_journal_id=journal_id, archive_sha256=hashlib.sha256(payload).hexdigest(),
+        source_journal_id=journal_id, archive_sha256=archive_hash(payload),
         archive_complete=ended_complete, samples=len(samples), route_snapshots=len(routes),
         route_switches=len(switches), route_ids=list(dict.fromkeys(r["route_id"] for r in routes.values())),
         start_odometer_km=odo[0] if odo else None, end_odometer_km=odo[-1] if odo else None,
@@ -197,6 +231,16 @@ def parse_archive(payload):
                                 for i, s in enumerate(samples))
     return dict(ok=True, summary=summary, samples=samples, events=events,
                 routes=list(routes.values()), route_switches=switches)
+
+
+def archive_hash(payload):
+    if not isinstance(payload, Path):
+        return hashlib.sha256(payload).hexdigest()
+    digest = hashlib.sha256()
+    with payload.open("rb") as stream:
+        for block in iter(lambda: stream.read(CHUNK_SIZE), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def validate_match(existing, imported):
