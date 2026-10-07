@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.18
+
+- Serve `basemaps.js` through the add-on's static-file allowlist, fixing the 404/MIME error and `X50Basemaps is not defined` in HA Ingress.
+- Check every local script and stylesheet referenced by the HTML through the actual Simulator HTTP handler, including version query strings and MIME types.
+
 ## 1.11.17
 
 - Choose OpenStreetMap, OSM France HOT, or CARTO Voyager/Light/Dark in settings; default to OpenStreetMap instead of relying on one CARTO endpoint.

@@ -35,6 +35,7 @@ ROOT = Path(__file__).parent
 GATEWAY = os.environ.get("X50_GATEWAY_URL", "http://127.0.0.1:8080")
 STATIC_FILES = {"/": "index.html", "/index.html": "index.html",
                 "/app.js": "app.js", "/trip_alignment.js": "trip_alignment.js",
+                "/basemaps.js": "basemaps.js",
                 "/styles.css": "styles.css"}
 
 
