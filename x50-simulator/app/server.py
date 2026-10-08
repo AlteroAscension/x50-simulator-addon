@@ -1738,7 +1738,11 @@ class SimulationEngine:
                             break
                 trip_id = target_id or archive["summary"]["id"]
                 existing, status = self.trip_store.detail(trip_id)
-                if status == 200 and existing["summary"].get("archive_sha256") == archive["summary"]["archive_sha256"]:
+                incoming_parts=archive["summary"].get("archive_parts") or []
+                duplicate_part=bool(status==200 and incoming_parts and any(
+                    p.get("archive_id")==incoming_parts[0]["archive_id"] and p.get("sha256")==digest
+                    for p in existing["summary"].get("archive_parts",[])))
+                if status == 200 and (duplicate_part or existing["summary"].get("archive_sha256") == archive["summary"]["archive_sha256"]):
                     retained.unlink(missing_ok=True)
                     return {"ok": True, "trip_id": trip_id, "already_imported": True}, 200
                 if target_id:
@@ -1927,13 +1931,18 @@ class SimulationEngine:
                     temporary = path.with_suffix(path.suffix + ".tmp")
                     temporary.write_bytes(payload)
                     temporary.replace(path)
-                self.journal_points_cache[journal_id] = (
-                    expected_hash, journal_points(path), journal_steering_events(path), journal_inertial_points(path))
             with gzip.open(path,"rt",encoding="utf8") as stream:
                 header=json.loads(stream.readline())
             if header.get("type")=="trip_start" and "part_index" in header.get("data",{}):
-                self.import_trip_archive(path)
+                already=any(p.get("archive_id")==journal_id and p.get("sha256")==expected_hash
+                            for trip in self.trip_store.list().get("trips",[])
+                            for p in trip.get("archive_parts",[]))
+                if not already:self.import_trip_archive(path)
+                self.journal_points_cache[journal_id]=(expected_hash,[],[],[])
                 continue
+            if self.journal_points_cache.get(journal_id,(None,))[0]!=expected_hash:
+                self.journal_points_cache[journal_id]=(
+                    expected_hash,journal_points(path),journal_steering_events(path),journal_inertial_points(path))
             cached = self.journal_points_cache[journal_id]
             if len(cached) < 4:
                 cached = (expected_hash, cached[1], journal_steering_events(path), journal_inertial_points(path))

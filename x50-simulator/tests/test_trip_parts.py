@@ -1,6 +1,8 @@
 import gzip
 import json
 import unittest
+import hashlib
+from unittest.mock import patch
 from pathlib import Path
 from test_archive_import import ArchiveImportTest, START, archive
 from journal_trajectory import journal_inertial_points
@@ -30,9 +32,26 @@ class TripPartsTest(ArchiveImportTest):
         self.assertEqual(len(detail['summary']['archive_parts']),2)
         repeated,status=self.engine.import_trip_archive(part(0))
         self.assertEqual(status,200,repeated)
+        self.assertTrue(repeated['already_imported'])
         detail,_=self.engine.trip_detail(first['trip_id'])
         self.assertEqual(len(detail['samples']),8)
         self.assertEqual(len(self.engine.trip_store.list()['trips']),1)
+
+    def test_ha_sync_joins_parts_and_skips_unchanged_archives(self):
+        import server
+        blobs={f'20261007-12000{i}-0123abcd':part(i,end=i==1) for i in range(2)}
+        listing={'journals':[dict(id=key,sha256=hashlib.sha256(value).hexdigest()) for key,value in blobs.items()]}
+        self.engine.journal_points_cache={}
+        with patch.object(server,'ha_request',return_value=(listing,200)), \
+             patch.object(server,'ha_journal_download',side_effect=lambda key,*args:blobs[key]):
+            self.engine._sync_ha_journals('unused','unused')
+        trips=self.engine.trip_store.list()['trips']
+        self.assertEqual(len(trips),1)
+        self.assertTrue(trips[0]['archive_complete'])
+        self.assertEqual(len(trips[0]['archive_parts']),2)
+        with patch.object(server,'ha_request',return_value=(listing,200)), \
+             patch.object(self.engine,'import_trip_archive',side_effect=AssertionError('unchanged part reimported')):
+            self.engine._sync_ha_journals('unused','unused')
 
     def test_conflicting_part_preserves_existing_trip(self):
         result,status=self.engine.import_trip_archive(part(0))

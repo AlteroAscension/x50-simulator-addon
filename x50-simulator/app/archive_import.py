@@ -327,6 +327,8 @@ def assemble_parts(root, raw, imported):
         aggregate=parse_archive(temporary,multipart=True)
         if not path.exists():
             staged=path.with_suffix(".tmp");shutil.copyfile(raw,staged);staged.replace(path)
+        for item,source in zip(aggregate["summary"]["archive_parts"],sources,strict=True):
+            item["sha256"]=archive_hash(source)
         temporary.replace(combined)
     finally:
         temporary.unlink(missing_ok=True)
