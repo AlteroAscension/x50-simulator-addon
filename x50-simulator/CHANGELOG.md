@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.23
+
+- Assemble linked Navigation archive parts into one trip, including reverse-order uploads and HA synchronization.
+- Validate part identities, ordering and predecessor links; retain original physical archives.
+- Read compact checkpoint/pose-delta columns while preserving older journal formats.
+
 ## 1.11.22
 
 - Tension the reference rope against locked nodes instead of rejecting cursor movements outside its reach. Adjacent nodes slide along a fixed-radius circle; two locks constrain the point from both sides.

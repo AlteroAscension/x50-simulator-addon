@@ -29,7 +29,7 @@ import tempfile
 from journal_trajectory import journal_points, journal_steering_events, journal_inertial_points, trajectory_for_trip
 from trajectory_order import snapshot_is_newer
 from reference_trajectory import ReferenceStore, create_reference
-from archive_import import MAX_UPLOAD, CHUNK_SIZE, ARCHIVE_SAMPLE_KEYS, ArchiveUploads, archive_hash, parse_archive, validate_match
+from archive_import import MAX_UPLOAD, CHUNK_SIZE, ARCHIVE_SAMPLE_KEYS, ArchiveUploads, archive_hash, parse_archive, validate_match, assemble_parts
 
 
 ROOT = Path(__file__).parent
@@ -1744,13 +1744,16 @@ class SimulationEngine:
                 if target_id:
                     if status != 200:
                         return existing, status
-                    validate_match(existing, archive)
+                    if existing["summary"].get("source_journal_id")!=journal_id or not archive["summary"].get("archive_parts"):
+                        validate_match(existing, archive)
                 elif status == 200:
-                    validate_match(existing, archive)
+                    if existing["summary"].get("source_journal_id")!=journal_id or not archive["summary"].get("archive_parts"):
+                        validate_match(existing, archive)
                 if status == 200 and existing["summary"].get("source_journal_id") not in (None, journal_id):
                     raise ValueError("К поездке уже прикреплён другой архив")
-                if status == 200 and existing["summary"].get("archive_complete") and not archive["summary"]["archive_complete"]:
+                if status == 200 and existing["summary"].get("archive_complete") and not archive["summary"]["archive_complete"] and not archive["summary"].get("archive_parts"):
                     raise ValueError("Неполный архив не может заменить уже загруженный полный")
+                raw,archive=assemble_parts(self.journal_dir,raw,archive)
                 with tempfile.TemporaryDirectory() as temporary:
                     path = Path(temporary) / "journal.jsonl.gz"
                     shutil.copyfile(raw, path)
@@ -1773,19 +1776,20 @@ class SimulationEngine:
                         saved, trace_status = self.trajectory_store.save(trace)
                         if trace_status != 200:
                             return saved, trace_status
-                if status == 200:
+                if status == 200 and existing["summary"].get("journal_source")!="uploaded_navigation_archive":
                     summary = dict(existing["summary"])
                     summary.update({k: archive["summary"][k] for k in
-                                    ("source_journal_id", "archive_sha256", "archive_complete")})
+                                    ("source_journal_id", "archive_sha256", "archive_complete", "archive_parts")})
                 else:
                     summary = archive["summary"]
                 # Keep the original live log intact. Both files use atomic replacement.
                 store._atomic_json(store.root / (trip_id + ".archive.json"), archive)
                 store._atomic_json(store._paths(trip_id)[1], summary)
-                cache = self.journal_dir / (journal_id + ".jsonl.gz")
+                cache = self.journal_dir / (("group-" if archive["summary"].get("archive_parts") else "")+journal_id+".jsonl.gz")
                 temporary = cache.with_suffix(".upload.tmp")
-                shutil.copyfile(raw, temporary)
-                temporary.replace(cache)
+                if raw!=cache:
+                    shutil.copyfile(raw, temporary)
+                    temporary.replace(cache)
                 retained.unlink(missing_ok=True)
                 return {"ok": True, "trip_id": trip_id, "routes": len(archive["routes"]),
                         "samples": len(archive["samples"]), "steering_points": trace["point_count"] if trace else 0,
@@ -1925,6 +1929,11 @@ class SimulationEngine:
                     temporary.replace(path)
                 self.journal_points_cache[journal_id] = (
                     expected_hash, journal_points(path), journal_steering_events(path), journal_inertial_points(path))
+            with gzip.open(path,"rt",encoding="utf8") as stream:
+                header=json.loads(stream.readline())
+            if header.get("type")=="trip_start" and "part_index" in header.get("data",{}):
+                self.import_trip_archive(path)
+                continue
             cached = self.journal_points_cache[journal_id]
             if len(cached) < 4:
                 cached = (expected_hash, cached[1], journal_steering_events(path), journal_inertial_points(path))

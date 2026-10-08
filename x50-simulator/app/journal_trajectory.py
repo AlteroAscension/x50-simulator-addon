@@ -40,7 +40,11 @@ def journal_inertial_points(path: Path) -> list[dict]:
             if not all(isinstance(t, (int, float)) and math.isfinite(t) for t in (wall, elapsed)):
                 continue
             if row.get("type") == "inertial_fusion_revision":
-                for source in data.get("points") or []:
+                columns=data.get("point_columns")
+                for encoded in data.get("points") or []:
+                    source=dict(zip(columns,encoded)) if isinstance(columns,list) and isinstance(encoded,list) else encoded
+                    if not isinstance(source,dict):
+                        continue
                     at = source.get("elapsed_ms")
                     if not isinstance(at, (int, float)) or not math.isfinite(at):
                         continue

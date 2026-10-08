@@ -116,16 +116,17 @@ def number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
 
 
-def parse_archive(payload):
+def parse_archive(payload, *, multipart=False):
     path = payload if isinstance(payload, Path) else None
     size = path.stat().st_size if path else len(payload)
-    if not size or size > MAX_UPLOAD:
+    if not size or size > (MAX_EXPANDED if multipart else MAX_UPLOAD):
         raise ValueError("Архив пустой или превышает 128 МБ")
     samples, routes, switches, events = {}, {}, [], []
     start = end = journal_id = None
     ended_complete = False
     diagnostic, current_route, device = {}, None, "head_unit"
     expanded = rows = 0
+    parts, last_stamp = [], None
     try:
         with (gzip.open(path, "rb") if path else gzip.GzipFile(fileobj=io.BytesIO(payload))) as stream:
             while True:
@@ -143,14 +144,30 @@ def parse_archive(payload):
                 if stamp is None or not isinstance(data, dict):
                     raise ValueError("В журнале отсутствуют время или данные записи")
                 if kind == "trip_start":
+                    identity = data.get("trip_id")
+                    if not isinstance(identity, str) or not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}", identity):
+                        raise ValueError("Invalid Navigation trip identity")
+                    index = data.get("part_index")
+                    physical = data.get("archive_id")
+                    if index is not None:
+                        if not isinstance(index,int) or isinstance(index,bool) or not 0<=index<10000:
+                            raise ValueError("Invalid trip part index")
+                        if not isinstance(physical,str) or not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}",physical):
+                            raise ValueError("Invalid trip archive identity")
+                        if parts and (index<=parts[-1]["part_index"] or data.get("trip_started_ms")!=parts[0]["trip_started_ms"]):
+                            raise ValueError("Conflicting trip parts")
+                        if parts and index==parts[-1]["part_index"]+1 and data.get("previous_archive_id")!=parts[-1]["archive_id"]:
+                            raise ValueError("Broken trip part chain")
+                        parts.append(dict(part_index=index,archive_id=physical,previous_archive_id=data.get("previous_archive_id"),
+                                          trip_started_ms=data.get("trip_started_ms")))
                     if start is not None:
-                        raise ValueError("Архив содержит несколько поездок")
-                    start, journal_id = stamp, data.get("trip_id")
-                    if not isinstance(journal_id, str) or not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}", journal_id):
-                        raise ValueError("Неизвестный формат идентификатора поездки")
+                        if identity!=journal_id or index is None or len(parts)<2 or stamp<(last_stamp or start):
+                            raise ValueError("Archive contains unrelated or unordered trips")
+                    else:
+                        start, journal_id = stamp, identity
                 elif kind == "trip_end":
                     end = stamp
-                    ended_complete = not data.get("truncated", False)
+                    ended_complete = not data.get("truncated", False) and not data.get("continuation",False)
                 elif kind == "route_snapshot" and data.get("available"):
                     device = "avd" if data.get("is_emulator") or data.get("device_kind") == "avd" else device
                     points = data.get("points") or data.get("exact_points") or []
@@ -195,6 +212,7 @@ def parse_archive(payload):
                     samples[bucket] = sample
                 elif kind.startswith("steering_"):
                     events.append(dict(kind="event", event=kind, time_ms=stamp, data=data))
+                last_stamp=stamp
     except (OSError, EOFError, UnicodeError, json.JSONDecodeError, TypeError, AttributeError) as error:
         raise ValueError("Повреждённый gzip/JSONL архив Navigation") from error
     if start is None or not samples:
@@ -208,6 +226,8 @@ def parse_archive(payload):
     odo = [s["odometer_km"] for s in samples if number(s.get("odometer_km")) is not None]
     integrated = sum(max(0, number(a.get("vehicle_speed_kmh")) or 0) / 3.6 *
                      min(2, max(0, (b["time_ms"]-a["time_ms"])/1000)) for a, b in zip(samples, samples[1:]))
+    if parts:
+        ended_complete=ended_complete and [p["part_index"] for p in parts]==list(range(parts[-1]["part_index"]+1))
     summary = dict(id="archive_"+journal_id, active=False, started_ms=start, ended_ms=finish,
         duration_s=(finish-start)/1000, device_kind=device, journal_source="uploaded_navigation_archive",
         source_journal_id=journal_id, archive_sha256=archive_hash(payload),
@@ -217,7 +237,7 @@ def parse_archive(payload):
         distance_odometer_m=max(0, (odo[-1]-odo[0])*1000) if odo else integrated,
         distance_integrated_m=integrated, max_speed_kmh=max(number(s.get("vehicle_speed_kmh")) or 0 for s in samples),
         correction_events=0, gps_outages=0, correction_total_m=0, correction_abs_total_m=0,
-        finish_reason="archive_import")
+        finish_reason="archive_import", archive_parts=parts)
     first, last = samples[0], samples[-1]
     summary.update(route_id=routes[current_route]["route_id"] if current_route in routes else "",
                    route_source=last.get("route_source", "none"),
@@ -278,3 +298,36 @@ def validate_match(existing, imported):
             if math.hypot(north, east) > 300:
                 raise ValueError("GPS архива не соответствует выбранной поездке")
             break
+
+
+def assemble_parts(root, raw, imported):
+    """Retain verified physical parts and stream a sorted concatenated gzip to disk.
+
+    gzip members remain original; no coordinate or timestamp rewriting occurs.
+    """
+    parts=imported["summary"].get("archive_parts") or []
+    if not parts:
+        return raw, imported
+    if len(parts)!=1:
+        raise ValueError("Upload one physical trip part at a time")
+    part=parts[0];group=imported["summary"]["source_journal_id"]
+    directory=Path(root)/"parts"/group;directory.mkdir(parents=True,exist_ok=True)
+    path=directory/f"{part['part_index']:04d}-{part['archive_id']}.jsonl.gz"
+    conflicting=list(directory.glob(f"{part['part_index']:04d}-*.jsonl.gz"))
+    if conflicting and (conflicting[0]!=path or archive_hash(conflicting[0])!=archive_hash(raw)):
+        raise ValueError("Conflicting content for the same trip part")
+    combined=Path(root)/("group-"+group+".jsonl.gz")
+    temporary=combined.with_suffix(".merge.tmp")
+    import shutil
+    try:
+        sources=sorted(set(directory.glob("*.jsonl.gz")) | {path})
+        with temporary.open("wb") as output:
+            for source in sources:
+                with (source if source.exists() else raw).open("rb") as stream:shutil.copyfileobj(stream,output,CHUNK_SIZE)
+        aggregate=parse_archive(temporary,multipart=True)
+        if not path.exists():
+            staged=path.with_suffix(".tmp");shutil.copyfile(raw,staged);staged.replace(path)
+        temporary.replace(combined)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return combined,aggregate
